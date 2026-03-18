@@ -1,11 +1,10 @@
 # CertiClaw Developer Log
 
-> **Current state (2026-03-18):** 6 iterations complete. 12 OCaml library
-> modules, 75 passing tests, 1 CLI executable. **All 6 security theorems
-> proved in Lean 4.** OCaml ↔ Lean correspondence tightened: effect
-> comparison aligned (canonical list equality), normalization contract
-> tested, 8-case correspondence corpus added. Only remaining gap:
-> path normalization (tested, not proved).
+> **Current state (2026-03-18):** 7 iterations complete. 12 OCaml library
+> modules, 75 passing tests. **All 6 security theorems + 6 normalization
+> theorems proved in Lean 4.** Segment-level normalization is now formally
+> verified (no-dot, no-dotdot, no-empty, idempotent, traversal consumed).
+> Only remaining gap: raw string splitting (unify_separators, split_segments).
 > External deps: `yojson` (OCaml), Lean 4.28.0 (proofs).
 
 ---
@@ -620,6 +619,86 @@ covers.  Each case documents which theorem it witnesses:
 
 ---
 
+## 2026-03-18 — Iteration 7: Verified Normalization Spec
+
+### Goal
+
+Prove the normalization contract that bridges raw path segments to the
+clean `List String` representation used by the checker model.
+
+### What was built
+
+Two new Lean files:
+
+| File | Lines | Content |
+|------|-------|---------|
+| `Normalize.lean` | ~65 | `resolveDotsGo`, `resolveDots`, `isClean`, `AllClean`, `IsNormalized`, predicates |
+| `NormalizeTheorems.lean` | ~130 | 6 proved theorems + helper lemmas |
+
+### `resolveDots` definition
+
+Matches OCaml `Path_check.resolve_dots` exactly:
+
+```
+resolveDotsGo acc []           = acc.reverse
+resolveDotsGo acc ("." :: r)   = resolveDotsGo acc r
+resolveDotsGo acc (".." :: r)  = resolveDotsGo (acc.tail) r  -- or [] if empty
+resolveDotsGo acc ("" :: r)    = resolveDotsGo acc r
+resolveDotsGo acc (s :: r)     = resolveDotsGo (s :: acc) r
+```
+
+### Proved theorems
+
+| # | Name | Statement |
+|---|------|-----------|
+| N1 | `resolveDots_noDot` | `"." ∉ resolveDots segs` |
+| N2 | `resolveDots_noDotDot` | `".." ∉ resolveDots segs` |
+| N3 | `resolveDots_noEmpty` | `"" ∉ resolveDots segs` |
+| N4 | `resolveDots_idempotent` | `resolveDots (resolveDots x) = resolveDots x` |
+| N5 | `containment_idempotent` | Re-normalizing doesn't change containment |
+| N6 | `traversal_consumed` | `".." ∉ resolveDots segs` |
+
+Plus the corollary `resolveDots_isNormalized` combining N1–N3.
+
+### Proof technique
+
+The central lemma is `resolveDotsGo_allClean`: if the accumulator
+contains only "clean" segments (not `.`, `..`, or `""`), then the
+output also contains only clean segments.  This is proved by induction
+on the input list with case analysis on whether the head is `.`, `..`,
+`""`, or a regular segment.
+
+Idempotence uses a separate lemma `resolveDotsGo_clean`: on already-clean
+input, `resolveDotsGo` just reverses the accumulator and appends the input.
+
+### What remains unmodeled
+
+The OCaml normalization pipeline has three steps:
+1. `unify_separators` — `\` → `/` (character replacement on raw string)
+2. `split_segments` — split on `/`, filter empty strings → `List String`
+3. `resolve_dots` — resolve `.` and `..` → clean `List String`
+
+Step 3 is now formalized. Steps 1–2 operate on raw strings and are
+not modeled.  The gap is:
+- **`unify_separators`**: character-level string transformation
+- **`split_segments`**: string splitting + filtering
+
+These are straightforward but require string/char lemmas that would
+add complexity without corresponding security insight.  The security-relevant
+logic (dot resolution, containment) is fully proved.
+
+### Files changed
+
+| File | Status |
+|------|--------|
+| `formal/CertiClaw/Normalize.lean` | **New** |
+| `formal/CertiClaw/NormalizeTheorems.lean` | **New** |
+| `formal/CertiClaw.lean` | Updated (imports) |
+| `formal/README.md` | Updated (correspondence table, normalization docs) |
+| `DEVLOG.md` | Updated |
+
+---
+
 ## Roadmap
 
 - [x] ~~Policy loading from JSON files~~ → Iteration 3
@@ -629,7 +708,8 @@ covers.  Each case documents which theorem it witnesses:
 - [x] ~~Invariant-style tests~~ → Iteration 4
 - [x] ~~Lean 4 mechanization of Theorems 1–6~~ → Iteration 5
 - [x] ~~OCaml ↔ Lean correspondence alignment~~ → Iteration 6
-- [ ] Formalize path normalization in Lean
+- [x] ~~Verified normalization spec~~ → Iteration 7
+- [ ] Formalize string splitting (unify_separators, split_segments)
 - [ ] Real MCP transport (JSON-RPC)
 - [ ] Symlink / realpath resolution
 - [ ] File-based audit log persistence

@@ -5,3 +5,5 @@ import CertiClaw.Infer
 import CertiClaw.Policy
 import CertiClaw.Check
 import CertiClaw.Theorems
+import CertiClaw.Normalize
+import CertiClaw.NormalizeTheorems

@@ -97,33 +97,55 @@ cd formal
 lake build
 ```
 
-## Correspondence Status (Iteration 6)
+## Correspondence Status (Iteration 7)
 
 | Aspect | Status | Notes |
 |--------|--------|-------|
-| Effect comparison | **Closed** | OCaml changed from set equality to canonical list equality (`<>`) — now matches Lean's `≠` exactly |
-| Effect ordering | **Closed** | Both OCaml and Lean return effects in identical deterministic order per action variant |
-| Policy membership | **Closed** | OCaml `List.mem` ↔ Lean `∈` (decidable) |
-| Path containment logic | **Closed** | OCaml `segments_within` ↔ Lean `List.isPrefixOf` — same segment-prefix semantics |
-| Path normalization | **Open** | OCaml `normalize` bridges raw strings to `List String`; not modeled in Lean |
-| Verified extraction | **Open** | Lean model is standalone; equivalence maintained by correspondence test corpus |
+| Effect comparison | **Closed** | Canonical list equality in both |
+| Effect ordering | **Closed** | Identical deterministic order |
+| Policy membership | **Closed** | `List.mem` ↔ `∈` |
+| Path containment logic | **Closed** | Prefix-on-segments in both |
+| Segment normalization | **Proved** | `resolveDots` proved to produce clean output (no `.`, `..`, `""`) |
+| Normalization idempotence | **Proved** | `resolveDots (resolveDots x) = resolveDots x` |
+| Traversal consumption | **Proved** | `".." ∉ resolveDots segs` |
+| Raw string → segments | **Open** | OCaml `split_segments`/`unify_separators` not modeled in Lean |
+| Verified extraction | **Open** | Lean model is standalone |
 
-### What is now tested but not proved
+### Normalization specification (Iteration 7)
 
-The OCaml test suite includes:
-- **Normalization contract tests** verifying that `normalize` produces
-  clean segment lists (no `.`, no `..`, idempotent, containment = prefix)
-- **Correspondence corpus** (8 test cases) exercising the same
-  action/policy/certificate/result scenarios that the Lean model covers
-- These could be exported to a Lean-side test harness for cross-validation
+The Lean model now includes a normalization spec in two files:
 
-### Remaining gap
+| File | What it defines |
+|------|-----------------|
+| `Normalize.lean` | `resolveDotsGo`, `resolveDots`, `isClean`, `AllClean`, `NoDot`, `NoDotDot`, `NoEmpty`, `IsNormalized` |
+| `NormalizeTheorems.lean` | 6 proved theorems (see below) |
 
-**Path normalization** is the only significant open gap.  The OCaml
-`Path_check.normalize` function converts raw strings to segment lists.
-The Lean model assumes paths are already `List String`.  To close this:
-1. Define `normalize : String → Option (List String)` in Lean
-2. Prove it satisfies the four contract properties
-3. Prove that `pathContains` on normalized paths equals `path_within`
+`resolveDots` matches OCaml `Path_check.resolve_dots` exactly:
+- `"."` → dropped
+- `".."` → pops previous segment; dropped at root
+- `""` → dropped (matching OCaml `split_segments` filter)
+- Everything else → kept
 
-This is the hardest remaining proof obligation.
+**Proved normalization theorems:**
+
+| # | Theorem | Statement |
+|---|---------|-----------|
+| N1 | `resolveDots_noDot` | `"." ∉ resolveDots segs` |
+| N2 | `resolveDots_noDotDot` | `".." ∉ resolveDots segs` |
+| N3 | `resolveDots_noEmpty` | `"" ∉ resolveDots segs` |
+| N4 | `resolveDots_idempotent` | `resolveDots (resolveDots segs) = resolveDots segs` |
+| N5 | `containment_idempotent` | Re-normalizing doesn't change containment |
+| N6 | `traversal_consumed` | `".." ∉ resolveDots segs` (alias of N2) |
+
+### What is still not modeled
+
+The normalization spec operates on `List String` (segment lists).
+The OCaml pipeline has two additional steps before `resolve_dots`:
+
+1. **`unify_separators`** — replaces `\` with `/` in the raw string
+2. **`split_segments`** — splits on `/` and filters empty strings
+
+These string-level operations are not modeled in Lean. To fully
+close the gap, one would need to formalize string splitting and
+prove it produces the same segments that `resolveDotsGo` then
+processes. This is the remaining proof obligation.
