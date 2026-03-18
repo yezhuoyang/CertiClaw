@@ -635,16 +635,17 @@ let correct_proof action =
   { claimed_effects = effects; destructive = destr;
     approval; explanation = None }
 
-(** Theorem 1 witness: if check succeeds, claimed = inferred. *)
+(** Theorem 1 witness: if check succeeds, claimed = inferred
+    (canonical list equality, matching Lean model). *)
 let test_invariant_effect_soundness () =
   List.iter (fun action ->
     let proof = correct_proof action in
     match check ~policy:test_policy ~proof ~action with
     | Accepted ->
       let inferred = infer_effects action in
-      assert_true "claimed = inferred on accept"
-        (Certiclaw.Check.effects_match proof.claimed_effects inferred)
-    | Rejected _ -> ()  (* rejected is fine — not testing acceptance *)
+      assert_true "claimed = inferred on accept (list equality)"
+        (proof.claimed_effects = inferred)
+    | Rejected _ -> ()
   ) all_test_actions
 
 (** Theorem 2 witness: if check succeeds, all effects authorized. *)
@@ -703,6 +704,22 @@ let test_invariant_mismatch_always_rejects () =
         (check ~policy:test_policy ~proof ~action)
     end
   ) all_test_actions
+
+(** Reordered effects now rejected (list equality, not set equality).
+    This matches the Lean model where list equality is used. *)
+let test_invariant_reordered_effects_rejected () =
+  let action = GrepRecursive {
+    pattern = "x"; root = "/home/user/src"; output = "/tmp/out";
+  } in
+  (* Canonical order: [ReadPath root; ExecBin "grep"; WritePath output]
+     Supply reversed order: *)
+  let proof = {
+    claimed_effects = [WritePath "/tmp/out"; ExecBin "grep";
+                       ReadPath "/home/user/src"];
+    destructive = false; approval = None; explanation = None;
+  } in
+  assert_rejected_with ClaimedEffectsMismatch
+    (check ~policy:test_policy ~proof ~action)
 
 (** Theorem 4 witness: MCP with unauthorized tool always rejects. *)
 let test_invariant_unauthorized_mcp_rejects () =
@@ -782,6 +799,192 @@ let test_pipeline_mismatch_preserves_context () =
       (List.length ctx.claimed_effects = 1)
 
 (* ================================================================== *)
+(* SECTION 10: Normalization contract tests (Lean abstraction)        *)
+(* ================================================================== *)
+
+(** These tests verify the contract that the Lean model relies on:
+    after normalization, paths are clean segment lists with no "."
+    or ".." segments, and containment is prefix-on-segments. *)
+
+(** After normalize, no "." segment remains. *)
+let test_norm_contract_no_dot () =
+  let paths = ["/a/./b"; "/./x/./y"; "a/./b/./c"] in
+  List.iter (fun p ->
+    match normalize p with
+    | Some np ->
+      let segs = String.split_on_char '/' np
+                 |> List.filter (fun s -> s <> "") in
+      assert_false ("no . in " ^ p)
+        (List.mem "." segs)
+    | None -> ()
+  ) paths
+
+(** After normalize, no ".." segment remains. *)
+let test_norm_contract_no_dotdot () =
+  let paths = ["/a/../b"; "/a/b/../c"; "a/b/../.."] in
+  List.iter (fun p ->
+    match normalize p with
+    | Some np ->
+      let segs = String.split_on_char '/' np
+                 |> List.filter (fun s -> s <> "") in
+      assert_false ("no .. in " ^ p)
+        (List.mem ".." segs)
+    | None -> ()
+  ) paths
+
+(** Containment after normalization is prefix-on-segments.
+    This is exactly what the Lean model's pathContains checks. *)
+let test_norm_contract_containment_is_prefix () =
+  (* parent segments are a prefix of child segments *)
+  assert_true "prefix containment"
+    (path_within ~parent:"/home/user" "/home/user/src/file.ml");
+  assert_false "not prefix (sibling)"
+    (path_within ~parent:"/home/user" "/home/other/file.ml");
+  assert_false "not prefix (shorter child)"
+    (path_within ~parent:"/home/user/src" "/home/user");
+  assert_true "equal paths"
+    (path_within ~parent:"/home/user" "/home/user")
+
+(** Normalization is idempotent. *)
+let test_norm_contract_idempotent () =
+  let paths = ["/a/b/c"; "/a/./b/../c"; "/home/user/src"] in
+  List.iter (fun p ->
+    match normalize p with
+    | Some np ->
+      (match normalize np with
+       | Some np2 ->
+         assert_equal ("idempotent: " ^ p) ~expected:np ~actual:np2
+       | None -> failwith ("second normalize failed for " ^ p))
+    | None -> ()
+  ) paths
+
+(* ================================================================== *)
+(* SECTION 11: OCaml ↔ Lean correspondence corpus                    *)
+(* ================================================================== *)
+
+(** A structured corpus of (action, policy, certificate, expected result)
+    tuples.  Each entry documents which Lean theorem it witnesses and
+    can be exported for a Lean-side test harness in the future.
+
+    The corpus uses segment-style paths (no raw "/" prefix issues)
+    that map cleanly to Lean's List String representation.
+
+    Naming: corpus_N_description *)
+
+(** Shared corpus policy — matches the Lean test scenarios. *)
+let corpus_policy : policy = {
+  readable_paths = ["/home/user/src"];
+  writable_paths = ["/home/user/src"; "/tmp"];
+  allowed_bins   = ["grep"; "curl"; "find"];
+  allowed_hosts  = ["example.com"];
+  allowed_mcp    = [("files", "read_file"); ("search", "query")];
+}
+
+(** Corpus 1: accepted grep — Lean Theorem 1+2 witness. *)
+let test_corpus_1_accepted_grep () =
+  let action = GrepRecursive {
+    pattern = "TODO"; root = "/home/user/src"; output = "/tmp/out.txt";
+  } in
+  let effects = infer_effects action in
+  assert_equal "grep canonical order [0]"
+    ~expected:"ReadPath(/home/user/src)"
+    ~actual:(show_action_effect (List.nth effects 0));
+  assert_equal "grep canonical order [1]"
+    ~expected:"ExecBin(grep)"
+    ~actual:(show_action_effect (List.nth effects 1));
+  assert_equal "grep canonical order [2]"
+    ~expected:"WritePath(/tmp/out.txt)"
+    ~actual:(show_action_effect (List.nth effects 2));
+  let proof = { claimed_effects = effects; destructive = false;
+                approval = None; explanation = None } in
+  assert_accepted (check ~policy:corpus_policy ~proof ~action)
+
+(** Corpus 2: rejected unauthorized write — Lean Theorem 2 witness. *)
+let test_corpus_2_rejected_write () =
+  let action = GrepRecursive {
+    pattern = "x"; root = "/home/user/src"; output = "/etc/passwd";
+  } in
+  let effects = infer_effects action in
+  let proof = { claimed_effects = effects; destructive = false;
+                approval = None; explanation = None } in
+  assert_rejected_with (UnauthorizedWrite "/etc/passwd")
+    (check ~policy:corpus_policy ~proof ~action)
+
+(** Corpus 3: rejected destructive without approval — Lean Theorem 3. *)
+let test_corpus_3_rejected_destructive () =
+  let action = RemoveByGlob {
+    root = "/tmp"; suffix = ".log"; recursive = true;
+  } in
+  let effects = infer_effects action in
+  let proof = { claimed_effects = effects; destructive = true;
+                approval = None; explanation = None } in
+  assert_rejected_with MissingDestructiveApproval
+    (check ~policy:corpus_policy ~proof ~action)
+
+(** Corpus 4: accepted MCP — Lean Theorem 4 witness. *)
+let test_corpus_4_accepted_mcp () =
+  let action = McpCall {
+    server = "files"; tool = "read_file"; args = "{}";
+  } in
+  let effects = infer_effects action in
+  assert_equal "mcp canonical order [0]"
+    ~expected:"McpUse(files, read_file)"
+    ~actual:(show_action_effect (List.nth effects 0));
+  let proof = { claimed_effects = effects; destructive = false;
+                approval = None; explanation = None } in
+  assert_accepted (check ~policy:corpus_policy ~proof ~action)
+
+(** Corpus 5: rejected MCP — Lean Theorem 4 negative. *)
+let test_corpus_5_rejected_mcp () =
+  let action = McpCall {
+    server = "files"; tool = "delete_file"; args = "{}";
+  } in
+  let effects = infer_effects action in
+  let proof = { claimed_effects = effects; destructive = false;
+                approval = None; explanation = None } in
+  assert_rejected_with (UnauthorizedMcpTool ("files", "delete_file"))
+    (check ~policy:corpus_policy ~proof ~action)
+
+(** Corpus 6: default deny — Lean Theorem 6.
+    Empty policy rejects all actions. *)
+let test_corpus_6_default_deny () =
+  let empty = Certiclaw.Policy_load.empty_policy in
+  let actions = [
+    GrepRecursive { pattern = "x"; root = "/a"; output = "/b" };
+    RemoveByGlob { root = "/a"; suffix = ".tmp"; recursive = false };
+    CurlToFile { url = "https://x.com/f"; host = "x.com"; output = "/b" };
+    McpCall { server = "s"; tool = "t"; args = "{}" };
+  ] in
+  List.iter (fun action ->
+    let effects = infer_effects action in
+    let proof = { claimed_effects = effects; destructive = false;
+                  approval = None; explanation = None } in
+    assert_rejected (check ~policy:empty ~proof ~action)
+  ) actions
+
+(** Corpus 7: effect list mismatch — Lean Theorem 1 negative. *)
+let test_corpus_7_effect_mismatch () =
+  let action = CurlToFile {
+    url = "https://example.com/f"; host = "example.com"; output = "/tmp/f";
+  } in
+  (* Wrong: only one of three effects *)
+  let proof = { claimed_effects = [NetTo "example.com"]; destructive = false;
+                approval = None; explanation = None } in
+  assert_rejected_with ClaimedEffectsMismatch
+    (check ~policy:corpus_policy ~proof ~action)
+
+(** Corpus 8: accepted destructive with approval — Lean Theorem 3 positive. *)
+let test_corpus_8_accepted_destructive () =
+  let action = RemoveByGlob {
+    root = "/tmp"; suffix = ".log"; recursive = true;
+  } in
+  let effects = infer_effects action in
+  let proof = { claimed_effects = effects; destructive = true;
+                approval = Some (ApprovedDestructive "ticket-99");
+                explanation = None } in
+  assert_accepted (check ~policy:corpus_policy ~proof ~action)
+
+(* ================================================================== *)
 (* Runner                                                              *)
 (* ================================================================== *)
 
@@ -859,6 +1062,7 @@ let () =
   run_test "inv: policy soundness"             test_invariant_policy_soundness;
   run_test "inv: approval soundness"           test_invariant_approval_soundness;
   run_test "inv: destructive requires approval" test_invariant_destructive_requires_approval;
+  run_test "inv: reordered effects rejected"   test_invariant_reordered_effects_rejected;
   run_test "inv: mismatch always rejects"      test_invariant_mismatch_always_rejects;
   run_test "inv: unauthorized MCP rejects"     test_invariant_unauthorized_mcp_rejects;
   run_test "inv: empty policy denies all"      test_invariant_empty_policy_denies_all;
@@ -867,6 +1071,22 @@ let () =
   run_test "pipeline accepted"                 test_pipeline_accepted;
   run_test "pipeline rejected preserves ctx"   test_pipeline_rejected_preserves_context;
   run_test "pipeline mismatch preserves ctx"   test_pipeline_mismatch_preserves_context;
+
+  Printf.printf "\n  -- Normalization contract (Lean abstraction) --\n";
+  run_test "norm contract: no dot"             test_norm_contract_no_dot;
+  run_test "norm contract: no dotdot"          test_norm_contract_no_dotdot;
+  run_test "norm contract: containment=prefix" test_norm_contract_containment_is_prefix;
+  run_test "norm contract: idempotent"         test_norm_contract_idempotent;
+
+  Printf.printf "\n  -- OCaml/Lean correspondence corpus --\n";
+  run_test "corpus 1: accepted grep"           test_corpus_1_accepted_grep;
+  run_test "corpus 2: rejected write"          test_corpus_2_rejected_write;
+  run_test "corpus 3: rejected destructive"    test_corpus_3_rejected_destructive;
+  run_test "corpus 4: accepted MCP"            test_corpus_4_accepted_mcp;
+  run_test "corpus 5: rejected MCP"            test_corpus_5_rejected_mcp;
+  run_test "corpus 6: default deny"            test_corpus_6_default_deny;
+  run_test "corpus 7: effect mismatch"         test_corpus_7_effect_mismatch;
+  run_test "corpus 8: accepted destructive"    test_corpus_8_accepted_destructive;
 
   Printf.printf "\n  Results: %d passed, %d failed\n\n" !passed !failed;
   if !failed > 0 then exit 1

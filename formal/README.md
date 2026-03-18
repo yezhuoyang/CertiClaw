@@ -97,23 +97,33 @@ cd formal
 lake build
 ```
 
-## Remaining Gaps Between Lean and OCaml
+## Correspondence Status (Iteration 6)
 
-1. **Path normalization** — The OCaml `Path_check.normalize` function
-   is not modeled.  To close this gap, one would need to:
-   - Define `normalize : String → Option (List String)` in Lean
-   - Prove that `pathContains` on normalized paths is equivalent to
-     the OCaml `path_within` behavior
-   - This is the hardest proof obligation remaining
+| Aspect | Status | Notes |
+|--------|--------|-------|
+| Effect comparison | **Closed** | OCaml changed from set equality to canonical list equality (`<>`) — now matches Lean's `≠` exactly |
+| Effect ordering | **Closed** | Both OCaml and Lean return effects in identical deterministic order per action variant |
+| Policy membership | **Closed** | OCaml `List.mem` ↔ Lean `∈` (decidable) |
+| Path containment logic | **Closed** | OCaml `segments_within` ↔ Lean `List.isPrefixOf` — same segment-prefix semantics |
+| Path normalization | **Open** | OCaml `normalize` bridges raw strings to `List String`; not modeled in Lean |
+| Verified extraction | **Open** | Lean model is standalone; equivalence maintained by correspondence test corpus |
 
-2. **Set vs list equality** — The OCaml checker uses set equality for
-   effects; the Lean model uses list equality.  To close this gap,
-   one could either:
-   - Change the OCaml checker to use list equality (safe, simple)
-   - Prove that set equality implies list equality when both lists
-     come from the same `infer` call (which they do for honest certs)
+### What is now tested but not proved
 
-3. **No verified extraction** — The Lean model is a standalone
-   specification.  It is not extracted to OCaml.  Equivalence between
-   the Lean model and the OCaml implementation is maintained by
-   structural correspondence and invariant-style tests.
+The OCaml test suite includes:
+- **Normalization contract tests** verifying that `normalize` produces
+  clean segment lists (no `.`, no `..`, idempotent, containment = prefix)
+- **Correspondence corpus** (8 test cases) exercising the same
+  action/policy/certificate/result scenarios that the Lean model covers
+- These could be exported to a Lean-side test harness for cross-validation
+
+### Remaining gap
+
+**Path normalization** is the only significant open gap.  The OCaml
+`Path_check.normalize` function converts raw strings to segment lists.
+The Lean model assumes paths are already `List String`.  To close this:
+1. Define `normalize : String → Option (List String)` in Lean
+2. Prove it satisfies the four contract properties
+3. Prove that `pathContains` on normalized paths equals `path_within`
+
+This is the hardest remaining proof obligation.

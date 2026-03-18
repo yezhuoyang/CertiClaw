@@ -1,9 +1,11 @@
 # CertiClaw Developer Log
 
-> **Current state (2026-03-18):** 5 iterations complete. 12 OCaml library
-> modules, 62 passing tests, 1 CLI executable. **All 6 security theorems
-> mechanically proved in Lean 4** (`formal/`). Trusted core (5 modules,
-> ~340 LOC OCaml) is explicitly isolated.
+> **Current state (2026-03-18):** 6 iterations complete. 12 OCaml library
+> modules, 75 passing tests, 1 CLI executable. **All 6 security theorems
+> proved in Lean 4.** OCaml ↔ Lean correspondence tightened: effect
+> comparison aligned (canonical list equality), normalization contract
+> tested, 8-case correspondence corpus added. Only remaining gap:
+> path normalization (tested, not proved).
 > External deps: `yojson` (OCaml), Lean 4.28.0 (proofs).
 
 ---
@@ -460,8 +462,8 @@ Lean 4, with paths abstracted as `List String` (segment lists).
 
 2. **Decidable propositional equality** — The Lean `check` uses
    `if cert.claimedEffects ≠ inferred then` with `DecidableEq`,
-   not BEq `!=`.  This is list equality (order-sensitive), which
-   is strictly stronger than the OCaml set equality.
+   not BEq `!=`.  This is list equality (order-sensitive).
+   (OCaml was aligned to match this in iteration 6.)
 
 3. **Policy membership via `∈`** — Uses Lean's decidable `∈` on lists,
    which maps cleanly to OCaml's `List.mem`.
@@ -524,6 +526,100 @@ available as a hypothesis.
 
 ---
 
+## 2026-03-18 — Iteration 6: Model–Implementation Correspondence
+
+### Goal
+
+Close the gap between the Lean formal model and the OCaml implementation.
+
+### 1. Effect equality aligned
+
+**Before:** OCaml `Check.effects_match` used set equality (order-insensitive
+mutual subset check). Lean used list equality (`≠`).
+
+**After:** OCaml `check` now uses `<>` (structural list equality).
+The old `effects_match` function is removed.  This makes the OCaml
+checker's Step 2 identical to the Lean model's.
+
+Reordered claimed effects are now rejected — this is stricter than
+before but still safe.  A correct agent obtains claimed effects by
+calling `infer_effects` directly, which always produces the same order.
+
+### 2. Canonical effect ordering documented
+
+Each action variant produces effects in a fixed order:
+
+| Action | Canonical list |
+|--------|---------------|
+| GrepRecursive | [ReadPath root; ExecBin "grep"; WritePath output] |
+| RemoveByGlob | [ExecBin "find"; WritePath root] |
+| CurlToFile | [ExecBin "curl"; NetTo host; WritePath output] |
+| McpCall | [McpUse (server, tool)] |
+
+This order matches the Lean `infer` function exactly.
+
+### 3. Normalization contract tests
+
+Four tests verify the contract the Lean model relies on:
+
+| Test | Property |
+|------|----------|
+| `no dot` | No "." segment after normalize |
+| `no dotdot` | No ".." segment after normalize |
+| `containment=prefix` | Containment is prefix-on-segments |
+| `idempotent` | normalize(normalize(p)) = normalize(p) |
+
+These document the boundary where the Lean abstraction (paths as
+`List String`) meets the OCaml implementation (raw strings).
+
+### 4. Correspondence test corpus
+
+8 structured test cases exercising the same scenarios the Lean model
+covers.  Each case documents which theorem it witnesses:
+
+| Corpus | Scenario | Lean theorem |
+|--------|----------|-------------|
+| 1 | Accepted grep | Thm 1+2 |
+| 2 | Rejected unauthorized write | Thm 2 |
+| 3 | Rejected destructive (no approval) | Thm 3 |
+| 4 | Accepted MCP | Thm 4 |
+| 5 | Rejected MCP | Thm 4 neg |
+| 6 | Default deny (empty policy) | Thm 6 |
+| 7 | Effect mismatch | Thm 1 neg |
+| 8 | Accepted destructive (with approval) | Thm 3 pos |
+
+### 5. Correspondence status
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| Effect comparison | Set equality (mismatch) | **List equality (aligned)** |
+| Effect ordering | Deterministic but undocumented | **Documented canonical order** |
+| Path containment logic | Aligned | Aligned |
+| Normalization contract | Untested | **4 contract tests** |
+| Cross-model corpus | None | **8 correspondence tests** |
+| Path normalization proof | Open | **Still open** (tested, not proved) |
+
+### Tests: 62 → 75
+
+| New section | Count | Covers |
+|-------------|-------|--------|
+| Normalization contract | 4 | No-dot, no-dotdot, containment=prefix, idempotent |
+| Correspondence corpus | 8 | 8 Lean-aligned test cases |
+| Reordered effects | 1 | List equality rejects reordered effects |
+
+### Files changed
+
+| File | Status | What changed |
+|------|--------|-------------|
+| `lib/check.ml` | Modified | Replaced `effects_match` with `<>` list equality |
+| `lib/infer.ml` | Modified | Documented canonical effect ordering |
+| `test/tests.ml` | Expanded | 62 → 75 tests |
+| `formal/README.md` | Updated | Correspondence status table |
+| `README.md` | Updated | Verification section, canonical ordering, normalization contract |
+| `DEVLOG.md` | Updated | Iteration 6 entry |
+
+---
+
 ## Roadmap
 
 - [x] ~~Policy loading from JSON files~~ → Iteration 3
@@ -532,11 +628,10 @@ available as a hypothesis.
 - [x] ~~Explicit TCB boundary~~ → Iteration 4
 - [x] ~~Invariant-style tests~~ → Iteration 4
 - [x] ~~Lean 4 mechanization of Theorems 1–6~~ → Iteration 5
+- [x] ~~OCaml ↔ Lean correspondence alignment~~ → Iteration 6
 - [ ] Formalize path normalization in Lean
 - [ ] Real MCP transport (JSON-RPC)
 - [ ] Symlink / realpath resolution
 - [ ] File-based audit log persistence
-- [ ] Policy hot-reload
 - [ ] LLM integration: agent generates IR + proof from natural language
 - [ ] Richer IR variants (file copy, directory creation, git operations)
-- [ ] Native compilation (fix mingw toolchain on Windows)

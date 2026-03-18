@@ -176,18 +176,62 @@ security argument tractable: instead of auditing ~2000 lines, you
 audit ~340 lines.  The TCB aligns with the formal specification in
 [`docs/formal-core.md`](docs/formal-core.md).
 
-## Formal Specification
+## Formal Verification
 
-[`docs/formal-core.md`](docs/formal-core.md) defines the formal model:
-- Syntax of actions and effects (§1–2)
-- Policy authorization judgment (§3)
-- Certificate structure (§4)
-- Check judgment with four-step rule (§5)
-- Six security theorems targeted for Coq/Lean mechanization (§6)
-- TCB summary and mechanization roadmap (§7–8)
+[`docs/formal-core.md`](docs/formal-core.md) defines the formal model.
+[`formal/`](formal/) contains a Lean 4 mechanization where **all 6
+security theorems are proved**:
 
-Each definition corresponds directly to OCaml code.  Invariant-style
-tests in the test suite serve as witnesses for the theorems.
+| # | Theorem | Status |
+|---|---------|--------|
+| 1 | Effect soundness: accepted ⟹ claimed = inferred | **Proved** |
+| 2 | Policy soundness: accepted ⟹ all effects authorized | **Proved** |
+| 3 | Approval soundness: accepted + destructive ⟹ approval present | **Proved** |
+| 4 | MCP authorization: mcpCall accepted ⟹ tool in policy | **Proved** |
+| 5 | Path traversal safety: trivially true (paths are segments) | **Proved** |
+| 6 | Default deny: empty policy rejects everything | **Proved** |
+
+### OCaml ↔ Lean correspondence
+
+The OCaml and Lean implementations are aligned:
+
+| Aspect | OCaml | Lean | Status |
+|--------|-------|------|--------|
+| Effect comparison | `<>` (canonical list equality) | `≠` (DecidableEq) | **Aligned** |
+| Effect ordering | Deterministic per-variant | Same order | **Aligned** |
+| Policy membership | `List.mem` | `∈` (decidable) | **Aligned** |
+| Path containment | `segments_within` after `normalize` | `List.isPrefixOf` | **Aligned** (see below) |
+| Path representation | Raw `string` → `normalize` → segments | `List String` (pre-normalized) | **Abstraction gap** |
+
+### Canonical effect ordering
+
+`infer_effects` returns effects in a fixed order per action variant:
+
+| Action | Canonical effect list |
+|--------|----------------------|
+| `GrepRecursive` | `[ReadPath root; ExecBin "grep"; WritePath output]` |
+| `RemoveByGlob` | `[ExecBin "find"; WritePath root]` |
+| `CurlToFile` | `[ExecBin "curl"; NetTo host; WritePath output]` |
+| `McpCall` | `[McpUse (server, tool)]` |
+
+The checker compares claimed effects against this canonical list using
+structural list equality.  Reordered effects are rejected.  This matches
+the Lean model exactly.
+
+### Path normalization contract
+
+The Lean model abstracts paths as `List String` (pre-normalized segments).
+The OCaml implementation bridges raw strings to this representation via
+`Path_check.normalize`, which guarantees:
+
+1. **No "." segments** remain after normalization
+2. **No ".." segments** remain after normalization
+3. **Containment is prefix-on-segments** after normalization
+4. **Normalization is idempotent**: `normalize(normalize(p)) = normalize(p)`
+
+These properties are verified by dedicated "normalization contract" tests.
+Path normalization remains the biggest unformalized gap — it is tested,
+not proved.
 
 ## Building
 
@@ -202,8 +246,11 @@ export OCAMLLIB="C:/Users/yezhu/AppData/Local/opam/default/lib/ocaml"
 # Build everything
 dune build
 
-# Run tests (62 tests)
+# Run tests (75 tests)
 dune exec test/tests.exe
+
+# Build Lean proofs
+cd formal && lake build
 
 # Run demo
 dune exec bin/demo.exe -- --demo
@@ -211,7 +258,7 @@ dune exec bin/demo.exe -- --demo
 
 ## Test Coverage
 
-62 tests organized in sections:
+75 tests organized in sections:
 
 | Section | Count | Covers |
 |---------|-------|--------|
@@ -222,13 +269,16 @@ dune exec bin/demo.exe -- --demo
 | Plan module | 2 | Successful plan, rejected plan |
 | Policy loading | 8 | Valid file, missing fields, malformed JSON, wrong types, bad MCP, not-object, file-not-found, deny-by-default |
 | Audit logging | 4 | Accepted record, rejected record, log collection, JSON format |
-| **Core invariants** | **7** | **Theorem witnesses: effect soundness, policy soundness, approval soundness, destructive gate, mismatch rejection, MCP authorization, default deny** |
+| Core invariants | 8 | Theorem witnesses + reordered-effects rejection |
 | Pipeline result | 3 | Accepted plan, rejected with context, mismatch with context |
+| **Normalization contract** | **4** | **No-dot, no-dotdot, containment=prefix, idempotent** |
+| **Correspondence corpus** | **8** | **OCaml↔Lean alignment: grep, write, destructive, MCP×2, deny, mismatch, approved** |
 
 ## Non-Goals
 
-- Coq/Lean formal verification (planned for later)
+- Formal verification of path normalization (tested, not proved)
 - Real MCP networking (simulated transport only)
 - Arbitrary shell parsing
 - LLM integration
 - Symlink/realpath resolution (pure lexical normalization only)
+- Verified extraction from Lean to OCaml

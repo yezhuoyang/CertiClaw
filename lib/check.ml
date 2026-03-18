@@ -11,20 +11,23 @@
     {2 Formal correspondence}
     Implements the {i check}(π, C, a) judgment from §5 of
     formal-core.md.  The four steps correspond directly to the
-    four premises of the judgment rule. *)
+    four premises of the judgment rule.
+
+    {2 Effect comparison}
+    Step 2 uses {b canonical list equality}, not set equality.
+    [Infer.infer_effects] returns effects in a fixed deterministic
+    order for each action variant (see infer.ml), and the checker
+    compares the claimed list against this canonical order.
+
+    This matches the Lean formal model exactly:
+    - Lean: [if cert.claimedEffects ≠ inferred then ...]
+    - OCaml: [if proof.claimed_effects <> inferred then ...]
+
+    A correct agent populates its certificate by calling
+    [Infer.infer_effects] and using the result directly, which
+    guarantees the lists match. *)
 
 open Types
-
-(* ================================================================== *)
-(* Effect-set comparison                                               *)
-(* ================================================================== *)
-
-(** [effects_match a b] checks set equality (order-insensitive). *)
-let effects_match (a : action_effect list) (b : action_effect list) : bool =
-  let subset xs ys =
-    List.for_all (fun x -> List.exists (fun y -> action_effect_equal x y) ys) xs
-  in
-  subset a b && subset b a
 
 (* ================================================================== *)
 (* Main judgment                                                       *)
@@ -33,7 +36,7 @@ let effects_match (a : action_effect list) (b : action_effect list) : bool =
 (** [check ~policy ~proof ~action] runs the four-step validation.
 
     Step 1: E ← infer(a)
-    Step 2: C.claimed = E  (set equality)
+    Step 2: C.claimed = E  (canonical list equality)
     Step 3: ∀ e ∈ E. authorized(π, e)
     Step 4: destructive(a) ⟹ C.approval = ApprovedDestructive(_) *)
 let check ~(policy : policy) ~(proof : proof) ~(action : action)
@@ -42,8 +45,8 @@ let check ~(policy : policy) ~(proof : proof) ~(action : action)
   (* Step 1 *)
   let inferred = Infer.infer_effects action in
 
-  (* Step 2 *)
-  if not (effects_match proof.claimed_effects inferred) then
+  (* Step 2: canonical list equality — matches Lean model exactly *)
+  if proof.claimed_effects <> inferred then
     Rejected ClaimedEffectsMismatch
 
   (* Step 3 *)
