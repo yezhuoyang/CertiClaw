@@ -1,0 +1,4 @@
+(executable
+ (name tests)
+ (modes byte)
+ (libraries certiclaw))
