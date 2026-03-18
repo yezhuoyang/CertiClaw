@@ -4,3 +4,5 @@ _build/
 *.install
 *.merlin
 .merlin
+formal/.lake/
+formal/lake-packages/

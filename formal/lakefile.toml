@@ -1,0 +1,6 @@
+name = "CertiClaw"
+version = "0.1.0"
+defaultTargets = ["CertiClaw"]
+
+[[lean_lib]]
+name = "CertiClaw"

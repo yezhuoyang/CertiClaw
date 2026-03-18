@@ -1,11 +1,10 @@
 # CertiClaw Developer Log
 
-> **Current state (2026-03-18):** 4 iterations complete. 12 library modules,
-> 62 passing tests, 1 CLI executable. Trusted core (5 modules, ~340 LOC)
-> is explicitly isolated with `[TRUSTED CORE]` tags and a `Core` facade.
-> Formal specification in `docs/formal-core.md` defines 6 security theorems.
-> Invariant-style tests serve as theorem witnesses.
-> External dependency: `yojson` (for policy file parsing).
+> **Current state (2026-03-18):** 5 iterations complete. 12 OCaml library
+> modules, 62 passing tests, 1 CLI executable. **All 6 security theorems
+> mechanically proved in Lean 4** (`formal/`). Trusted core (5 modules,
+> ~340 LOC OCaml) is explicitly isolated.
+> External deps: `yojson` (OCaml), Lean 4.28.0 (proofs).
 
 ---
 
@@ -432,6 +431,99 @@ All 12 modules updated with:
 
 ---
 
+## 2026-03-18 — Iteration 5: Lean 4 Mechanization
+
+### Goal
+
+Prove all six security theorems from the formal specification in
+Lean 4, with paths abstracted as `List String` (segment lists).
+
+### What was built
+
+5 Lean files in `formal/CertiClaw/`:
+
+| File | Lines | What it defines |
+|------|-------|-----------------|
+| `Types.lean` | ~80 | Effect, Action, Policy, Certificate, CheckError, CheckResult |
+| `Infer.lean` | ~30 | `infer`, `isDestructive` |
+| `Policy.lean` | ~55 | `pathContains`, `authorizeEffect`, `authorizeAll`, `emptyPolicy` |
+| `Check.lean` | ~40 | `check` (four-step judgment) |
+| `Theorems.lean` | ~175 | All 6 theorems + helper lemmas |
+
+### Key design decisions
+
+1. **Paths as `List String`** — Not raw `String`.  This makes paths
+   pre-normalized by construction.  `PathTraversalBlocked` is absent
+   from the Lean model because traversal is impossible at the type level.
+   Path normalization is treated as an implementation concern at the
+   OCaml `Path_check.normalize` boundary.
+
+2. **Decidable propositional equality** — The Lean `check` uses
+   `if cert.claimedEffects ≠ inferred then` with `DecidableEq`,
+   not BEq `!=`.  This is list equality (order-sensitive), which
+   is strictly stronger than the OCaml set equality.
+
+3. **Policy membership via `∈`** — Uses Lean's decidable `∈` on lists,
+   which maps cleanly to OCaml's `List.mem`.
+
+### Proved theorems
+
+| # | Lean name | Statement |
+|---|-----------|-----------|
+| 1 | `effect_soundness` | accepted ⟹ claimed = inferred |
+| 2 | `policy_soundness` | accepted ⟹ ∀ e ∈ inferred. authorized(π, e) |
+| 3 | `approval_soundness` | accepted ∧ destructive ⟹ approval present |
+| 4 | `mcp_authorization_soundness` | accepted ∧ mcpCall(s,t,_) ⟹ (s,t) ∈ π.allowedMcp |
+| 5 | `path_traversal_safety` | trivially true (paths are `List String`) |
+| 6 | `default_deny_all_actions` | emptyPolicy rejects every action |
+
+### Proof techniques
+
+- **`check_accepted_conditions`**: central lemma that decomposes a
+  successful `check` into its three postconditions
+- **`authorizeAll_none_imp_each`**: connects `authorizeAll = none` to
+  per-element authorization
+- **Case analysis**: most proofs work by `simp only [check]` then
+  `split at h` to walk through the four steps
+- **`Decidable.of_not_not`**: bridges `¬(a ≠ b)` to `a = b`
+
+### Hardest proof obligation
+
+**Theorem 3 (approval soundness)** required careful navigation of
+nested `if`/`match` in the `check` definition.  After the `split`
+on `isDestructive`, Lean automatically decomposed the inner `match`
+on `cert.approval`, so the `ApprovedDestructive` case was directly
+available as a hypothesis.
+
+### Remaining gaps
+
+1. **Path normalization not modeled** — the hardest missing piece.
+   Would require formalizing `normalize : String → Option (List String)`
+   and proving it preserves the containment semantics.
+
+2. **Set vs list equality** — OCaml uses set equality for effects;
+   Lean uses list equality.  Both are safe (list is stricter).
+
+3. **No verified extraction** — Lean model is standalone.  Equivalence
+   with OCaml is maintained by structural correspondence + tests.
+
+### Files created/changed in iteration 5
+
+| File | Status |
+|------|--------|
+| `formal/lakefile.toml` | **New** |
+| `formal/lean-toolchain` | **New** |
+| `formal/CertiClaw.lean` | **New** |
+| `formal/CertiClaw/Types.lean` | **New** |
+| `formal/CertiClaw/Infer.lean` | **New** |
+| `formal/CertiClaw/Policy.lean` | **New** |
+| `formal/CertiClaw/Check.lean` | **New** |
+| `formal/CertiClaw/Theorems.lean` | **New** |
+| `formal/README.md` | **New** |
+| `.gitignore` | Updated (Lean build artifacts) |
+
+---
+
 ## Roadmap
 
 - [x] ~~Policy loading from JSON files~~ → Iteration 3
@@ -439,7 +531,8 @@ All 12 modules updated with:
 - [x] ~~Formal specification~~ → Iteration 4
 - [x] ~~Explicit TCB boundary~~ → Iteration 4
 - [x] ~~Invariant-style tests~~ → Iteration 4
-- [ ] Coq or Lean mechanization of Theorems 1–6
+- [x] ~~Lean 4 mechanization of Theorems 1–6~~ → Iteration 5
+- [ ] Formalize path normalization in Lean
 - [ ] Real MCP transport (JSON-RPC)
 - [ ] Symlink / realpath resolution
 - [ ] File-based audit log persistence
