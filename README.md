@@ -1,6 +1,28 @@
 # CertiClaw
 
-A proof-carrying agent execution framework in OCaml.
+A proof-carrying agent execution framework in OCaml with Lean 4
+verified security properties.
+
+## Artifact Quick Start
+
+```bash
+# Prerequisites: OCaml 5.x + dune + yojson, Lean 4.28.0
+
+# Run everything (tests + evaluation + proofs)
+./run_all.sh
+
+# Or individually:
+./run_tests.sh          # 75 OCaml unit tests + 12-case evaluation corpus
+./run_proofs.sh         # 18 Lean 4 machine-checked theorems
+
+# Evaluation corpus with timing
+dune exec eval/run_eval.exe              # human-readable table
+dune exec eval/run_eval.exe -- --csv     # CSV output
+dune exec eval/run_eval.exe -- --json    # JSON lines output
+
+# Demo with audit log
+dune exec bin/demo.exe -- --demo --audit-json
+```
 
 ## Purpose
 

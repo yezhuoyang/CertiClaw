@@ -1,10 +1,9 @@
 # CertiClaw Developer Log
 
-> **Current state (2026-03-18):** 8 iterations complete. 12 OCaml library
-> modules, 75 passing tests. **All 6 security theorems + 6 normalization
-> theorems + 6 frontend theorems proved in Lean 4.** The entire lexical
-> path pipeline (separator unification → splitting → filtering → dot
-> resolution) is formally verified. No significant proof gaps remain.
+> **Current state (2026-03-18):** 9 iterations complete. 13 OCaml library
+> modules, 75 unit tests, 12-case evaluation corpus with timing.
+> **18 machine-checked Lean 4 theorems.** Artifact scripts for
+> reproducible validation (tests + eval + proofs in one command).
 > External deps: `yojson` (OCaml), Lean 4.28.0 (proofs).
 
 ---
@@ -763,6 +762,63 @@ the checker is formally verified.
 
 ---
 
+## 2026-03-18 — Iteration 9: Evaluation Harness and Artifact Packaging
+
+### Goal
+
+Turn CertiClaw into a publishable, reproducible artifact with a
+meaningful evaluation harness.
+
+### Evaluation corpus (`lib/eval_corpus.ml`)
+
+12 structured cases covering the threat model:
+
+| Category | Cases | Description |
+|----------|-------|-------------|
+| Benign | 4 | valid grep, curl, MCP, approved destructive |
+| Attack | 8 | unauth write/host/MCP, no approval, forged cert (reorder + subset), default deny, path escape |
+
+Each case specifies action, policy, certificate, and expected result.
+
+### Batch runner (`eval/run_eval.exe`)
+
+Runs all 12 cases with iterated timing (10k iterations per case).
+
+Output formats:
+- **Text**: table with case name, category, pass/fail, time, result
+- **CSV**: `--csv` flag for import into spreadsheets/scripts
+- **JSON**: `--json` flag for programmatic consumption
+
+Sample output:
+```
+Benign accepted:  4 / 4
+Attacks blocked:  8 / 8
+Avg check time:   ~3 us
+```
+
+### Artifact scripts
+
+| Script | What it does |
+|--------|-------------|
+| `run_tests.sh` | Build + 75 unit tests + evaluation corpus |
+| `run_proofs.sh` | Build Lean 4 formal proofs (18 theorems) |
+| `run_all.sh` | All three steps in sequence |
+
+### Files changed
+
+| File | Status |
+|------|--------|
+| `lib/eval_corpus.ml` | **New** — 12 structured evaluation cases |
+| `eval/run_eval.ml` | **New** — batch runner with timing |
+| `eval/dune` | **New** — dune config |
+| `run_tests.sh` | **New** — test script |
+| `run_proofs.sh` | **New** — proof script |
+| `run_all.sh` | **New** — full validation script |
+| `README.md` | Updated — artifact quick-start section |
+| `DEVLOG.md` | Updated |
+
+---
+
 ## Roadmap
 
 - [x] ~~Policy loading from JSON files~~ → Iteration 3
@@ -774,9 +830,8 @@ the checker is formally verified.
 - [x] ~~OCaml ↔ Lean correspondence alignment~~ → Iteration 6
 - [x] ~~Verified normalization spec~~ → Iteration 7
 - [x] ~~Verified path frontend~~ → Iteration 8
+- [x] ~~Evaluation harness and artifact packaging~~ → Iteration 9
 - [ ] Real MCP transport (JSON-RPC)
-- [ ] Symlink / realpath resolution
-- [ ] File-based audit log persistence
 - [ ] Verified extraction (Lean → OCaml)
-- [ ] LLM integration: agent generates IR + proof from natural language
-- [ ] Richer IR variants (file copy, directory creation, git operations)
+- [ ] LLM integration
+- [ ] Richer IR variants
