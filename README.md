@@ -27,7 +27,10 @@ docker build -t certiclaw .
 docker run --rm certiclaw
 ```
 
-See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for detailed validation steps.
+See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for expected outputs
+and [ARTIFACT.md](ARTIFACT.md) for the full artifact manifest.
+
+[![CI](https://github.com/yezhuoyang/CertiClaw/actions/workflows/ci.yml/badge.svg)](https://github.com/yezhuoyang/CertiClaw/actions/workflows/ci.yml)
 
 ## Purpose
 

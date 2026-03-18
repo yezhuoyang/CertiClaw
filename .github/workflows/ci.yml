@@ -1,0 +1,51 @@
+name: CertiClaw CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── OCaml tests and evaluation ──────────────────────────────────
+  ocaml:
+    name: OCaml Tests + Evaluation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.3"
+
+      - name: Install dependencies
+        run: opam install yojson -y
+
+      - name: Build
+        run: opam exec -- dune build
+
+      - name: Unit tests (75 tests)
+        run: opam exec -- dune exec test/tests.exe
+
+      - name: Evaluation corpus (29 cases)
+        run: opam exec -- dune exec eval/run_eval.exe
+
+      - name: Paper-ready summary
+        run: opam exec -- dune exec eval/run_eval.exe -- --summary
+
+  # ── Lean 4 proofs ───────────────────────────────────────────────
+  lean:
+    name: Lean 4 Proofs (18 theorems)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Build Lean proofs
+        working-directory: formal
+        run: lake build

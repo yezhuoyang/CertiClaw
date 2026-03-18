@@ -1,9 +1,9 @@
 _build/
-*.exe
-*.bc
-*.install
-*.merlin
-.merlin
 formal/.lake/
 formal/lake-packages/
 certiClawPaper/
+.git/
+.github/
+.claude/
+*.exe
+*.bc
