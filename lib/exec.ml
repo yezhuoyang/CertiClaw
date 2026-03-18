@@ -5,7 +5,9 @@
 
     By default, execution is simulated (dry-run).  A real executor
     would call [Sys.command] or invoke an MCP transport; those are
-    out of scope for this MVP. *)
+    out of scope for this MVP.
+
+    All decisions are recorded in an optional {!Audit.audit_log}. *)
 
 open Types
 
@@ -36,12 +38,25 @@ let simulate_mcp ~server ~tool ~args =
 
     [~dry_run] (default [true]) controls whether the Bash command is
     actually executed.  In dry-run mode the rendered command is
-    returned without being run. *)
-let execute ?(dry_run = true) ~(policy : policy) ~(proof : proof)
-    (action : action) : exec_result =
+    returned without being run.
+
+    If [~audit_log] is provided, an audit record is appended for
+    every decision (accepted or rejected). *)
+let execute ?(dry_run = true) ?(audit_log : Audit.audit_log option)
+    ~(policy : policy) ~(proof : proof) (action : action) : exec_result =
 
   (* Phase 1: check *)
-  match Check.check ~policy ~proof ~action with
+  let cr = Check.check ~policy ~proof ~action in
+
+  (* Emit audit record *)
+  let mode = if dry_run then Audit.DryRun else Audit.Live in
+  (match audit_log with
+   | Some log ->
+     let record = Audit.make_record ~action ~proof ~mode ~check_result:cr in
+     Audit.log_record log record
+   | None -> ());
+
+  match cr with
   | Rejected err -> ExecBlocked err
 
   | Accepted ->

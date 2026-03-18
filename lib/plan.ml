@@ -2,17 +2,33 @@
 
     [plan] runs the check-and-render pipeline and returns a structured
     [execution_plan] on success, or a [check_error] on failure.
-    It never executes anything. *)
+    It never executes anything.
+
+    If an audit log is provided, both accepted and rejected decisions
+    are recorded. *)
 
 open Types
 
 (** Build an execution plan: check, infer effects, render.
     Returns [Ok plan] or [Error check_error].
     The [dry_run] flag is recorded in the plan for informational
-    purposes only — this function never executes. *)
-let plan ?(dry_run = true) ~(policy : policy) ~(proof : proof)
+    purposes only — this function never executes.
+
+    If [~audit_log] is provided, an audit record is appended. *)
+let plan ?(dry_run = true) ?(audit_log : Audit.audit_log option)
+    ~(policy : policy) ~(proof : proof)
     (action : action) : (execution_plan, check_error) result =
-  match Check.check ~policy ~proof ~action with
+  let cr = Check.check ~policy ~proof ~action in
+
+  (* Emit audit record *)
+  (match audit_log with
+   | Some log ->
+     let record = Audit.make_record ~action ~proof
+         ~mode:Audit.CheckOnly ~check_result:cr in
+     Audit.log_record log record
+   | None -> ());
+
+  match cr with
   | Rejected err -> Error err
   | Accepted ->
     let inferred = Infer.infer_effects action in

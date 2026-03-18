@@ -1,9 +1,11 @@
 # CertiClaw Developer Log
 
-> **Current state (2026-03-18):** 2 iterations complete. 8 library modules,
-> 40 passing tests, 1 demo executable. Trusted core covers typed IR,
+> **Current state (2026-03-18):** 3 iterations complete. 10 library modules,
+> 52 passing tests, 1 CLI executable. Trusted core covers typed IR,
 > effect inference, segment-based path checking, typed error reporting,
-> and structured execution plans. No external runtime dependencies.
+> and structured execution plans. Policy loaded from JSON files.
+> Every decision is recorded in a structured audit log.
+> External dependency: `yojson` (for policy file parsing).
 
 ---
 
@@ -175,17 +177,127 @@ Five sample actions through the plan pipeline:
    (consistent internally, but not Windows-canonical).
 3. **Relative paths** — handled but not anchored to a working directory;
    callers should use absolute paths for reliable results.
-4. **Policy is in-code** — no YAML/JSON file loading yet.
+4. ~~**Policy is in-code**~~ → Fixed in iteration 3 (JSON file loading).
 5. **MCP is simulated** — no real JSON-RPC transport.
+
+---
+
+## 2026-03-18 — Iteration 3: Policy-Driven Runtime
+
+### Goal
+
+Move policy out of code into JSON files, add structured audit logging
+for every decision, and build a proper CLI executable.
+
+### 1. Policy file loading (`lib/policy_load.ml` — new)
+
+Loads a `Types.policy` from a JSON file using `yojson`.
+
+**JSON schema:**
+```json
+{
+  "readable_paths": ["/home/user/src"],
+  "writable_paths": ["/tmp"],
+  "allowed_bins":   ["grep"],
+  "allowed_hosts":  ["example.com"],
+  "allowed_mcp":    [["server", "tool"]]
+}
+```
+
+**Key properties:**
+- All fields are optional — missing fields default to `[]` (deny-by-default)
+- Invalid shapes produce typed `policy_load_error` values:
+  - `FileNotFound of string`
+  - `JsonParseError of string`
+  - `SchemaError of string`
+- `empty_policy` provides an all-deny baseline
+- MCP entries must be exactly 2-element string arrays
+
+### 2. Audit logging (`lib/audit.ml` — new)
+
+Every check/execute/plan decision produces an `audit_record`:
+
+```ocaml
+type audit_record = {
+  seq              : int;
+  action           : action;
+  inferred_effects : action_effect list;
+  claimed_effects  : action_effect list;
+  decision         : decision;       (* Accepted | Rejected of check_error *)
+  rendered         : rendered_form option;
+  mode             : exec_mode;      (* DryRun | Live | CheckOnly *)
+}
+```
+
+**Output formats:**
+- `show_record` — human-readable multi-line text
+- `json_record` — single JSON line (for JSONL log files)
+
+**In-memory log:**
+- `create_log ()` → append-only `audit_log`
+- `log_record` / `get_records` for append and read
+- `reset_seq ()` for testing
+
+### 3. Pipeline integration
+
+Both `Exec.execute` and `Plan.plan` now accept an optional
+`?audit_log` parameter.  When provided, they append an audit record
+for every decision — accepted or rejected, dry-run or live.
+
+### 4. CLI executable (`bin/demo.ml` — rewritten)
+
+Supports flags:
+
+| Flag | Effect |
+|------|--------|
+| `--policy PATH` | Load policy from JSON file |
+| `--demo` | Run 5 sample actions through the pipeline |
+| `--dry-run` | (default) Don't execute commands |
+| `--execute` | Actually execute validated commands |
+| `--audit-json` | Print audit log as JSON lines |
+
+Example: `dune exec bin/demo.exe -- --demo --policy examples/policy.json --audit-json`
+
+### 5. Test expansion: 40 → 52
+
+| New section | Count | Covers |
+|-------------|-------|--------|
+| Policy loading | 8 | Valid file, missing fields, malformed JSON, wrong types, bad MCP shape, not-object, file-not-found, deny-by-default |
+| Audit logging | 4 | Accepted record, rejected record, log collection, JSON format |
+
+### Files changed in iteration 3
+
+| File | Status | What changed |
+|------|--------|-------------|
+| `lib/policy_load.ml` | **New** | JSON policy file parsing with typed errors |
+| `lib/audit.ml` | **New** | Structured audit records, text + JSON formatting |
+| `lib/exec.ml` | Modified | Optional `?audit_log` parameter; emits records |
+| `lib/plan.ml` | Modified | Optional `?audit_log` parameter; emits records |
+| `lib/dune` | Modified | Added `yojson` dependency |
+| `bin/demo.ml` | Rewritten | Full CLI with --policy/--demo/--audit-json flags |
+| `examples/policy.json` | **New** | Example policy file |
+| `test/tests.ml` | Expanded | 40 → 52 tests |
+| `README.md` | Updated | Policy format, CLI usage, audit docs, TCB table |
+
+### Remaining limitations
+
+1. **No symlink resolution** — purely lexical path normalization.
+2. **No Windows drive-letter canonicalization**.
+3. **Relative paths** — handled but not anchored to working directory.
+4. **MCP is simulated** — no real JSON-RPC transport.
+5. **Audit is in-memory** — no file-based log persistence yet.
+6. **No policy hot-reload** — policy loaded once at startup.
 
 ---
 
 ## Roadmap
 
-- [ ] Policy loading from YAML/JSON config files
+- [x] ~~Policy loading from JSON files~~ → Iteration 3
+- [x] ~~Audit logging of all decisions~~ → Iteration 3
 - [ ] Real MCP transport (JSON-RPC)
 - [ ] Symlink / realpath resolution
-- [ ] Audit logging of all check/execute decisions
+- [ ] File-based audit log persistence
+- [ ] Policy hot-reload
 - [ ] Formal verification of checker properties in Coq or Lean
 - [ ] LLM integration: agent generates IR + proof from natural language
 - [ ] Richer IR variants (file copy, directory creation, git operations)

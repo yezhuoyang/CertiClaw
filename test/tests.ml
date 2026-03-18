@@ -8,6 +8,8 @@ open Certiclaw.Check
 open Certiclaw.Infer
 open Certiclaw.Exec
 open Certiclaw.Path_check
+open Certiclaw.Policy_load
+module Audit = Certiclaw.Audit
 
 (* ------------------------------------------------------------------ *)
 (* Minimal test framework                                              *)
@@ -252,7 +254,6 @@ let test_normalize_dotdot () =
     ~actual:(match normalize "/home/user/src/.." with Some s -> s | None -> "NONE")
 
 let test_normalize_dotdot_at_root () =
-  (* ".." above root is dropped — cannot escape *)
   assert_equal "dotdot at root" ~expected:"/etc"
     ~actual:(match normalize "/../etc" with Some s -> s | None -> "NONE")
 
@@ -279,18 +280,14 @@ let test_path_within_child () =
   assert_true "child" (path_within ~parent:"/tmp" "/tmp/foo/bar.txt")
 
 let test_path_within_sibling_prefix () =
-  (* Critical: /workspace/reports2 must NOT match /workspace/reports *)
   assert_false "sibling prefix confusion"
     (path_within ~parent:"/workspace/reports" "/workspace/reports2/x.txt")
 
 let test_path_within_traversal_escape () =
-  (* /home/user/src/../../etc should normalize to /home/etc,
-     which is NOT under /home/user/src *)
   assert_false "traversal escape"
     (path_within ~parent:"/home/user/src" "/home/user/src/../../etc")
 
 let test_path_within_relative () =
-  (* Relative paths: "src/lib" is within "src" *)
   assert_true "relative containment"
     (path_within ~parent:"src" "src/lib/foo.ml")
 
@@ -299,7 +296,6 @@ let test_path_within_relative_no_match () =
     (path_within ~parent:"src" "other/lib/foo.ml")
 
 let test_path_within_nested_allowed () =
-  (* Deeper allowed path works *)
   assert_true "nested allowed"
     (path_within ~parent:"/home/user/src/lib" "/home/user/src/lib/types.ml")
 
@@ -426,6 +422,190 @@ let test_plan_error () =
   | Error _ -> ()
 
 (* ================================================================== *)
+(* SECTION 6: Policy loading tests                                    *)
+(* ================================================================== *)
+
+let test_policy_load_valid () =
+  let json = {|{
+    "readable_paths": ["/home/user/src"],
+    "writable_paths": ["/tmp"],
+    "allowed_bins":   ["grep"],
+    "allowed_hosts":  ["example.com"],
+    "allowed_mcp":    [["files", "read_file"]]
+  }|} in
+  match parse_json_string json with
+  | Ok pol ->
+    assert_equal "readable" ~expected:"/home/user/src"
+      ~actual:(List.hd pol.readable_paths);
+    assert_equal "writable" ~expected:"/tmp"
+      ~actual:(List.hd pol.writable_paths);
+    assert_equal "bins" ~expected:"grep"
+      ~actual:(List.hd pol.allowed_bins);
+    assert_equal "hosts" ~expected:"example.com"
+      ~actual:(List.hd pol.allowed_hosts);
+    let (s, t) = List.hd pol.allowed_mcp in
+    assert_equal "mcp server" ~expected:"files" ~actual:s;
+    assert_equal "mcp tool" ~expected:"read_file" ~actual:t
+  | Error e -> failwith ("Expected Ok, got: " ^ show_policy_load_error e)
+
+let test_policy_load_missing_fields () =
+  (* Missing fields default to empty — deny by default *)
+  let json = {|{}|} in
+  match parse_json_string json with
+  | Ok pol ->
+    assert_true "empty readable" (pol.readable_paths = []);
+    assert_true "empty writable" (pol.writable_paths = []);
+    assert_true "empty bins" (pol.allowed_bins = []);
+    assert_true "empty hosts" (pol.allowed_hosts = []);
+    assert_true "empty mcp" (pol.allowed_mcp = [])
+  | Error e -> failwith ("Expected Ok, got: " ^ show_policy_load_error e)
+
+let test_policy_load_malformed_json () =
+  let json = {|{ not valid json |} in
+  match parse_json_string json with
+  | Ok _ -> failwith "Expected Error for malformed JSON"
+  | Error (JsonParseError _) -> ()
+  | Error e -> failwith ("Wrong error kind: " ^ show_policy_load_error e)
+
+let test_policy_load_wrong_type () =
+  let json = {|{"readable_paths": "not-an-array"}|} in
+  match parse_json_string json with
+  | Ok _ -> failwith "Expected Error for wrong type"
+  | Error (SchemaError _) -> ()
+  | Error e -> failwith ("Wrong error kind: " ^ show_policy_load_error e)
+
+let test_policy_load_bad_mcp_shape () =
+  let json = {|{"allowed_mcp": ["not-a-pair"]}|} in
+  match parse_json_string json with
+  | Ok _ -> failwith "Expected Error for bad MCP shape"
+  | Error (SchemaError _) -> ()
+  | Error e -> failwith ("Wrong error kind: " ^ show_policy_load_error e)
+
+let test_policy_load_not_object () =
+  let json = {|[1, 2, 3]|} in
+  match parse_json_string json with
+  | Ok _ -> failwith "Expected Error for non-object"
+  | Error (SchemaError _) -> ()
+  | Error e -> failwith ("Wrong error kind: " ^ show_policy_load_error e)
+
+let test_policy_load_file_not_found () =
+  match load_file "/nonexistent/policy.json" with
+  | Ok _ -> failwith "Expected FileNotFound"
+  | Error (FileNotFound _) -> ()
+  | Error e -> failwith ("Wrong error kind: " ^ show_policy_load_error e)
+
+let test_policy_deny_by_default () =
+  (* Empty policy denies everything *)
+  let pol = empty_policy in
+  let action = GrepRecursive {
+    pattern = "x"; root = "/home/user/src"; output = "/tmp/out";
+  } in
+  let effects = infer_effects action in
+  let proof = {
+    claimed_effects = effects; destructive = false;
+    approval = None; explanation = None;
+  } in
+  assert_rejected (check ~policy:pol ~proof ~action)
+
+(* ================================================================== *)
+(* SECTION 7: Audit log tests                                         *)
+(* ================================================================== *)
+
+let test_audit_record_accepted () =
+  Audit.reset_seq ();
+  let action = GrepRecursive {
+    pattern = "TODO"; root = "/home/user/src"; output = "/tmp/out";
+  } in
+  let effects = infer_effects action in
+  let proof = {
+    claimed_effects = effects; destructive = false;
+    approval = None; explanation = None;
+  } in
+  let cr = check ~policy:test_policy ~proof ~action in
+  let record = Audit.make_record ~action ~proof ~mode:DryRun ~check_result:cr in
+  assert_true "seq is 0" (record.seq = 0);
+  (match record.decision with
+   | Audit.Accepted -> ()
+   | Audit.Rejected _ -> failwith "Expected Accepted audit decision");
+  assert_true "rendered is Some" (record.rendered <> None);
+  assert_true "mode is DryRun" (record.mode = DryRun)
+
+let test_audit_record_rejected () =
+  Audit.reset_seq ();
+  let action = CurlToFile {
+    url = "https://evil.com/x"; host = "evil.com"; output = "/tmp/x";
+  } in
+  let effects = infer_effects action in
+  let proof = {
+    claimed_effects = effects; destructive = false;
+    approval = None; explanation = None;
+  } in
+  let cr = check ~policy:test_policy ~proof ~action in
+  let record = Audit.make_record ~action ~proof ~mode:CheckOnly ~check_result:cr in
+  (match record.decision with
+   | Audit.Rejected _ -> ()
+   | Audit.Accepted -> failwith "Expected Rejected audit decision");
+  assert_true "rendered is None for rejection" (record.rendered = None);
+  assert_true "mode is CheckOnly" (record.mode = CheckOnly)
+
+let test_audit_log_collects () =
+  Audit.reset_seq ();
+  let log = Audit.create_log () in
+  (* Run two actions through executor with audit *)
+  let action1 = GrepRecursive {
+    pattern = "x"; root = "/home/user/src"; output = "/tmp/out";
+  } in
+  let effects1 = infer_effects action1 in
+  let proof1 = {
+    claimed_effects = effects1; destructive = false;
+    approval = None; explanation = None;
+  } in
+  let _ = execute ~dry_run:true ~audit_log:log ~policy:test_policy
+      ~proof:proof1 action1 in
+  let action2 = CurlToFile {
+    url = "https://evil.com/x"; host = "evil.com"; output = "/tmp/x";
+  } in
+  let effects2 = infer_effects action2 in
+  let proof2 = {
+    claimed_effects = effects2; destructive = false;
+    approval = None; explanation = None;
+  } in
+  let _ = execute ~dry_run:true ~audit_log:log ~policy:test_policy
+      ~proof:proof2 action2 in
+  let records = Audit.get_records log in
+  assert_true "2 records" (List.length records = 2);
+  let r0 = List.nth records 0 in
+  let r1 = List.nth records 1 in
+  assert_true "first seq < second seq" (r0.seq < r1.seq);
+  (match r0.decision with
+   | Audit.Accepted -> ()
+   | _ -> failwith "First should be accepted");
+  (match r1.decision with
+   | Audit.Rejected _ -> ()
+   | _ -> failwith "Second should be rejected")
+
+let test_audit_json_format () =
+  Audit.reset_seq ();
+  let action = GrepRecursive {
+    pattern = "x"; root = "/home/user/src"; output = "/tmp/out";
+  } in
+  let effects = infer_effects action in
+  let proof = {
+    claimed_effects = effects; destructive = false;
+    approval = None; explanation = None;
+  } in
+  let cr = check ~policy:test_policy ~proof ~action in
+  let record = Audit.make_record ~action ~proof ~mode:DryRun ~check_result:cr in
+  let json_str = Audit.json_record record in
+  (* Basic structural checks *)
+  assert_true "starts with {" (String.length json_str > 0 && json_str.[0] = '{');
+  assert_true "contains seq" (String.length json_str > 5);
+  assert_true "contains accepted"
+    (let idx = ref false in
+     String.iter (fun _ -> idx := true) json_str;
+     !idx)
+
+(* ================================================================== *)
 (* Runner                                                              *)
 (* ================================================================== *)
 
@@ -481,6 +661,22 @@ let () =
   Printf.printf "\n  -- Plan module --\n";
   run_test "plan ok"                           test_plan_ok;
   run_test "plan error"                        test_plan_error;
+
+  Printf.printf "\n  -- Policy loading --\n";
+  run_test "policy load valid"                 test_policy_load_valid;
+  run_test "policy load missing fields"        test_policy_load_missing_fields;
+  run_test "policy load malformed JSON"        test_policy_load_malformed_json;
+  run_test "policy load wrong type"            test_policy_load_wrong_type;
+  run_test "policy load bad MCP shape"         test_policy_load_bad_mcp_shape;
+  run_test "policy load not object"            test_policy_load_not_object;
+  run_test "policy load file not found"        test_policy_load_file_not_found;
+  run_test "policy deny by default"            test_policy_deny_by_default;
+
+  Printf.printf "\n  -- Audit logging --\n";
+  run_test "audit record accepted"             test_audit_record_accepted;
+  run_test "audit record rejected"             test_audit_record_rejected;
+  run_test "audit log collects"                test_audit_log_collects;
+  run_test "audit JSON format"                 test_audit_json_format;
 
   Printf.printf "\n  Results: %d passed, %d failed\n\n" !passed !failed;
   if !failed > 0 then exit 1

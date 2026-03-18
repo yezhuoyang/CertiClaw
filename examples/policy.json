@@ -1,0 +1,7 @@
+{
+  "readable_paths": ["/home/user/src", "/usr/share/doc"],
+  "writable_paths": ["/home/user/src", "/tmp"],
+  "allowed_bins":   ["grep", "curl", "find"],
+  "allowed_hosts":  ["example.com", "api.github.com"],
+  "allowed_mcp":    [["files", "read_file"], ["search", "query"]]
+}

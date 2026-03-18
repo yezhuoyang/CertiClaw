@@ -1,3 +1,4 @@
 (library
  (name certiclaw)
- (modes byte))
+ (modes byte)
+ (libraries yojson))
