@@ -21,16 +21,10 @@ let shell_quote s =
 (* Rendering                                                           *)
 (* ------------------------------------------------------------------ *)
 
-(** Render result: either a Bash command or a note that the action
-    is not Bash-renderable (e.g. MCP calls). *)
-type render_result =
-  | BashCommand of string
-  | NotBashRenderable of string
-
-(** Render an action to its shell command form.
-    Only Bash-backed actions produce [BashCommand]; MCP calls produce
-    [NotBashRenderable]. *)
-let render (action : action) : render_result =
+(** Render an action to its [rendered_form].
+    Bash-backed actions produce [BashCommand]; MCP calls produce
+    [McpRequest]. *)
+let render (action : action) : rendered_form =
   match action with
   | GrepRecursive { pattern; root; output } ->
     let cmd = Printf.sprintf "grep -R -n %s %s > %s"
@@ -51,7 +45,5 @@ let render (action : action) : render_result =
     in
     BashCommand cmd
 
-  | McpCall { server; tool; args = _ } ->
-    NotBashRenderable
-      (Printf.sprintf "MCP call: server=%s tool=%s (use MCP transport)"
-         server tool)
+  | McpCall { server; tool; args } ->
+    McpRequest { server; tool; args }

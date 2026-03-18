@@ -1,8 +1,9 @@
 (** CertiClaw core types.
 
     This module defines the typed IR for agent actions, effects,
-    policies, approvals, and proof certificates. The trusted core
-    reasons over these types — never over free-form strings. *)
+    policies, approvals, proof certificates, and checker error types.
+    The trusted core reasons over these types — never over free-form
+    strings. *)
 
 (* ------------------------------------------------------------------ *)
 (* Effects: what an action does to the outside world                   *)
@@ -99,6 +100,57 @@ type action =
       args   : string;  (** JSON-encoded arguments *)
     }
 
+(** Pretty-print an action (compact form for logs/demos). *)
+let show_action = function
+  | GrepRecursive { pattern; root; output } ->
+    Printf.sprintf "GrepRecursive { pattern=%S; root=%S; output=%S }"
+      pattern root output
+  | RemoveByGlob { root; suffix; recursive } ->
+    Printf.sprintf "RemoveByGlob { root=%S; suffix=%S; recursive=%b }"
+      root suffix recursive
+  | CurlToFile { url; host; output } ->
+    Printf.sprintf "CurlToFile { url=%S; host=%S; output=%S }"
+      url host output
+  | McpCall { server; tool; args } ->
+    Printf.sprintf "McpCall { server=%S; tool=%S; args=%S }"
+      server tool args
+
+(* ------------------------------------------------------------------ *)
+(* Typed checker errors                                                *)
+(* ------------------------------------------------------------------ *)
+
+(** Structured error type for checker rejections.
+    Each variant captures the specific reason for rejection so that
+    callers can match on error kind without parsing strings. *)
+type check_error =
+  | ClaimedEffectsMismatch
+  | UnauthorizedRead     of string
+  | UnauthorizedWrite    of string
+  | UnauthorizedBinary   of string
+  | UnauthorizedHost     of string
+  | UnauthorizedMcpTool  of string * string
+  | MissingDestructiveApproval
+  | PathTraversalBlocked of string
+
+(** Pretty-print a checker error for human consumption. *)
+let show_check_error = function
+  | ClaimedEffectsMismatch ->
+    "Claimed effects do not match inferred effects"
+  | UnauthorizedRead p ->
+    "Unauthorized read: " ^ p
+  | UnauthorizedWrite p ->
+    "Unauthorized write: " ^ p
+  | UnauthorizedBinary b ->
+    "Unauthorized binary: " ^ b
+  | UnauthorizedHost h ->
+    "Unauthorized host: " ^ h
+  | UnauthorizedMcpTool (s, t) ->
+    "Unauthorized MCP tool: " ^ s ^ "/" ^ t
+  | MissingDestructiveApproval ->
+    "Destructive action requires explicit approval"
+  | PathTraversalBlocked p ->
+    "Path traversal blocked: " ^ p
+
 (* ------------------------------------------------------------------ *)
 (* Checker result                                                      *)
 (* ------------------------------------------------------------------ *)
@@ -106,4 +158,23 @@ type action =
 (** Result of running the checker on an (action, proof, policy) triple. *)
 type check_result =
   | Accepted
-  | Rejected of string  (** human-readable reason *)
+  | Rejected of check_error  (** structured rejection reason *)
+
+(* ------------------------------------------------------------------ *)
+(* Execution plan (dry-run output)                                     *)
+(* ------------------------------------------------------------------ *)
+
+(** What the renderer produced for a validated action. *)
+type rendered_form =
+  | BashCommand of string
+  | McpRequest  of { server : string; tool : string; args : string }
+
+(** A structured execution plan returned by [Plan.plan] after a
+    successful check-and-render pass.  Contains everything needed
+    to inspect what would happen, without actually executing. *)
+type execution_plan = {
+  input_action    : action;
+  inferred_effects : action_effect list;
+  rendered        : rendered_form;
+  dry_run         : bool;
+}

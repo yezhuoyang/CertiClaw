@@ -15,9 +15,9 @@ open Types
 
 (** The outcome of attempting to execute an action. *)
 type exec_result =
-  | ExecOk      of string   (** success message / rendered command *)
-  | ExecBlocked of string   (** checker rejected the action *)
-  | ExecError   of string   (** post-check error (render / runtime) *)
+  | ExecOk      of string       (** success message / rendered command *)
+  | ExecBlocked of check_error  (** checker rejected the action *)
+  | ExecError   of string       (** post-check error (render / runtime) *)
 
 (* ------------------------------------------------------------------ *)
 (* Simulated MCP transport                                             *)
@@ -42,12 +42,12 @@ let execute ?(dry_run = true) ~(policy : policy) ~(proof : proof)
 
   (* Phase 1: check *)
   match Check.check ~policy ~proof ~action with
-  | Rejected reason -> ExecBlocked reason
+  | Rejected err -> ExecBlocked err
 
   | Accepted ->
     (* Phase 2: render *)
     match Render.render action with
-    | Render.BashCommand cmd ->
+    | BashCommand cmd ->
       if dry_run then
         ExecOk ("[DRY-RUN] " ^ cmd)
       else begin
@@ -58,10 +58,5 @@ let execute ?(dry_run = true) ~(policy : policy) ~(proof : proof)
                           exit_code cmd)
       end
 
-    | Render.NotBashRenderable _msg ->
-      (* MCP path: always simulated for now *)
-      match action with
-      | McpCall { server; tool; args } ->
-        ExecOk (simulate_mcp ~server ~tool ~args)
-      | _ ->
-        ExecError "Action is not Bash-renderable and not an MCP call"
+    | McpRequest { server; tool; args } ->
+      ExecOk (simulate_mcp ~server ~tool ~args)

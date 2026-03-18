@@ -28,7 +28,7 @@ let effects_match (a : action_effect list) (b : action_effect list) : bool =
 (* ------------------------------------------------------------------ *)
 
 (** Run all validation checks on [(action, proof, policy)].
-    Returns [Accepted] or [Rejected reason]. *)
+    Returns [Accepted] or [Rejected check_error]. *)
 let check ~(policy : policy) ~(proof : proof) ~(action : action)
   : check_result =
 
@@ -37,17 +37,17 @@ let check ~(policy : policy) ~(proof : proof) ~(action : action)
 
   (* Step 2: verify claimed effects match inferred effects *)
   if not (effects_match proof.claimed_effects inferred) then
-    Rejected "Claimed effects do not match inferred effects"
+    Rejected ClaimedEffectsMismatch
 
   (* Step 3: verify all effects are authorized by policy *)
   else match Policy.authorize_all policy inferred with
-  | Some reason -> Rejected reason
+  | Some err -> Rejected err
 
   (* Step 4: if action is destructive, require explicit approval *)
   | None ->
     if Infer.is_destructive action then
       match proof.approval with
       | Some (ApprovedDestructive _) -> Accepted
-      | _ -> Rejected "Destructive action requires explicit approval"
+      | _ -> Rejected MissingDestructiveApproval
     else
       Accepted

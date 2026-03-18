@@ -167,11 +167,177 @@ dune exec test/tests.exe
 
 ### What's Next
 
+- [x] ~~Path canonicalization and symlink handling~~ → Hardened in iteration 2 (see below)
+- [x] ~~Typed checker errors~~ → Added in iteration 2
 - [ ] Policy loading from YAML/JSON config files
 - [ ] Real MCP transport (JSON-RPC)
-- [ ] Path canonicalization and symlink handling
+- [ ] Symlink / realpath resolution (requires filesystem access)
 - [ ] Audit logging of all check/execute decisions
 - [ ] Formal verification of checker properties in Coq or Lean
 - [ ] LLM integration: agent generates IR + proof from natural language
 - [ ] Native compilation (fix mingw toolchain setup)
+- [ ] Richer IR variants (file copy, directory creation, git operations)
+
+---
+
+## 2026-03-18 — Iteration 2: Hardening the Trusted Core
+
+### Overview
+
+This iteration hardens the checking and execution boundary without adding
+new IR variants or external integrations.  The focus is on three areas:
+path safety, typed errors, and structured execution plans.
+
+### 1. Segment-Based Path Authorization (path_check.ml)
+
+**Problem**: The MVP used `String.sub` prefix matching for path
+containment.  This had two bugs:
+
+- **Sibling-prefix confusion**: `/workspace/reports2/x.txt` was accepted
+  under the policy path `/workspace/reports` because `"reports"` is a
+  byte-prefix of `"reports2"`.
+- **Traversal bypass**: `/home/user/src/../../etc/passwd` was accepted
+  under `/home/user/src` because the raw string starts with the allowed
+  prefix.
+
+**Solution**: New `Path_check` module with:
+
+1. **Normalization** (`normalize`):
+   - Unify separators: `\` → `/`
+   - Split on `/`, filter empty segments (handles `//`)
+   - Resolve `.` (drop) and `..` (pop previous segment; clamp at root)
+   - Reconstruct with leading `/` if originally absolute
+
+2. **Segment-based containment** (`segments_within`):
+   - After normalization, compare *lists of segments*, not byte strings
+   - `/workspace/reports` = segments `["workspace"; "reports"]`
+   - `/workspace/reports2/x` = segments `["workspace"; "reports2"; "x"]`
+   - The second segment `"reports2" ≠ "reports"` → correctly rejected
+
+3. **Traversal detection** (`has_traversal`):
+   - Quick pre-check: does the path contain any `..` segment?
+   - If yes, `authorize_effect` returns `PathTraversalBlocked` immediately
+   - This provides clear error messages; traversal would also fail the
+     normalized containment check, but the explicit error is more helpful
+
+**Tested with**: sibling-prefix, `../` escape, relative paths, nested
+allowed paths, backslash normalization, root edge cases.
+
+### 2. Typed Checker Errors (types.ml check_error)
+
+**Problem**: The MVP used `Rejected of string` everywhere.  Callers had
+to parse English to determine the rejection reason.
+
+**Solution**: New `check_error` variant type:
+
+```ocaml
+type check_error =
+  | ClaimedEffectsMismatch
+  | UnauthorizedRead     of string
+  | UnauthorizedWrite    of string
+  | UnauthorizedBinary   of string
+  | UnauthorizedHost     of string
+  | UnauthorizedMcpTool  of string * string
+  | MissingDestructiveApproval
+  | PathTraversalBlocked of string
+```
+
+`check_result` is now `Accepted | Rejected of check_error`.
+`exec_result.ExecBlocked` also carries `check_error` instead of string.
+`show_check_error` provides human-readable messages.
+
+Tests assert exact error constructors, not just "rejected".
+
+### 3. Structured Execution Plan (plan.ml)
+
+**Problem**: The executor either ran the command or printed a dry-run
+string.  There was no structured inspection of what *would* happen.
+
+**Solution**: New `Plan` module and types:
+
+```ocaml
+type rendered_form =
+  | BashCommand of string
+  | McpRequest  of { server; tool; args }
+
+type execution_plan = {
+  input_action     : action;
+  inferred_effects : action_effect list;
+  rendered         : rendered_form;
+  dry_run          : bool;
+}
+
+val plan : ?dry_run:bool -> policy:policy -> proof:proof
+         -> action -> (execution_plan, check_error) result
+```
+
+`plan` runs check + render without executing, returning a structured
+record.  `show_plan` formats it for display.  The `rendered_form` type
+replaces the old `Render.render_result` — `McpCall` now produces
+`McpRequest` (a structured record) instead of a free-form string.
+
+### 4. Demo Executable (bin/demo.ml)
+
+New `bin/demo.exe` runs five actions through the plan pipeline:
+
+1. Valid grep → Accepted, shows Bash command
+2. Remove without approval → Rejected (MissingDestructiveApproval)
+3. Curl to disallowed host → Rejected (UnauthorizedHost)
+4. Valid MCP call → Accepted, shows MCP request
+5. Path traversal attempt → Rejected (PathTraversalBlocked)
+
+### 5. Test Expansion
+
+Test count: 12 → 40
+
+| New section | Tests | What they cover |
+|-------------|-------|-----------------|
+| Path normalization | 9 | Absolute, trailing slash, `//`, `.`, `..`, root-escape, `\`, root, empty |
+| Segment containment | 11 | Exact, child, sibling-prefix, traversal, relative, nested, `has_traversal` |
+| Typed errors | 6 | Exact constructor matching for each `check_error` variant |
+| Plan module | 2 | Successful plan, rejected plan |
+
+### Changed Files
+
+| File | Change |
+|------|--------|
+| `lib/types.ml` | Added `check_error` type, `show_check_error`, `show_action`, `rendered_form`, `execution_plan`; changed `check_result` to use `check_error` |
+| `lib/path_check.ml` | **New** — path normalization and segment-based containment |
+| `lib/policy.ml` | Rewritten to use `Path_check` and return `check_error` instead of strings |
+| `lib/check.ml` | Updated to return typed `check_error` variants |
+| `lib/render.ml` | Returns `rendered_form` (from types) instead of local `render_result` |
+| `lib/plan.ml` | **New** — structured execution plan builder |
+| `lib/exec.ml` | `ExecBlocked` now carries `check_error`; updated for new render types |
+| `test/tests.ml` | Expanded from 12 → 40 tests |
+| `bin/dune` | **New** — dune config for demo executable |
+| `bin/demo.ml` | **New** — dry-run demo |
+| `README.md` | Full rewrite with architecture, guarantees, limitations, build instructions |
+
+### Remaining Limitations
+
+1. **No symlink resolution** — Path normalization is purely lexical.  A
+   symlink at `/home/user/src/link → /etc` would pass the containment
+   check because we don't call `realpath`.  This requires filesystem
+   access and is deferred.
+
+2. **No Windows drive letters** — `C:\foo` normalizes to `/C:/foo` which
+   works for internal consistency but is not canonicalized against
+   actual Windows semantics.
+
+3. **Relative paths** — The system handles them but cannot verify they
+   resolve within allowed directories without knowing the working directory.
+   Callers should use absolute paths.
+
+4. **Policy is in-code** — No file-based policy loading yet.
+
+5. **MCP is simulated** — No real JSON-RPC transport.
+
+### What's Next
+
+- [ ] Policy loading from YAML/JSON config files
+- [ ] Real MCP transport (JSON-RPC)
+- [ ] Symlink / realpath resolution
+- [ ] Audit logging of all check/execute decisions
+- [ ] Formal verification of checker properties in Coq or Lean
+- [ ] LLM integration: agent generates IR + proof from natural language
 - [ ] Richer IR variants (file copy, directory creation, git operations)
