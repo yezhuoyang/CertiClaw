@@ -1,10 +1,10 @@
 # CertiClaw Developer Log
 
-> **Current state (2026-03-18):** 7 iterations complete. 12 OCaml library
+> **Current state (2026-03-18):** 8 iterations complete. 12 OCaml library
 > modules, 75 passing tests. **All 6 security theorems + 6 normalization
-> theorems proved in Lean 4.** Segment-level normalization is now formally
-> verified (no-dot, no-dotdot, no-empty, idempotent, traversal consumed).
-> Only remaining gap: raw string splitting (unify_separators, split_segments).
+> theorems + 6 frontend theorems proved in Lean 4.** The entire lexical
+> path pipeline (separator unification → splitting → filtering → dot
+> resolution) is formally verified. No significant proof gaps remain.
 > External deps: `yojson` (OCaml), Lean 4.28.0 (proofs).
 
 ---
@@ -699,6 +699,70 @@ logic (dot resolution, containment) is fully proved.
 
 ---
 
+## 2026-03-18 — Iteration 8: Verified Path Frontend
+
+### Goal
+
+Formalize the raw-string-to-segments pipeline (separator unification,
+splitting, empty filtering) and prove it composes with `resolveDots`
+to produce fully normalized output.
+
+### What was built
+
+`PathFrontend.lean` — the final piece of the path normalization proof:
+
+| Definition | Type | Corresponds to |
+|------------|------|----------------|
+| `backslashChar` | `Char` | U+005C |
+| `unifySepChars` | `List Char → List Char` | OCaml `unify_separators` |
+| `unifySeparators` | `String → String` | String wrapper |
+| `splitOnSlashChars` | `List Char → List (List Char)` | OCaml `String.split_on_char '/'` |
+| `splitOnSlash` | `String → List String` | Unify + split + convert |
+| `filterEmpty` | `List String → List String` | OCaml `List.filter (fun s -> s <> "")` |
+| `normalizePath` | `String → List String` | Full pipeline: unify → split → filter → resolveDots |
+
+### Proved theorems
+
+| Theorem | Statement |
+|---------|-----------|
+| `splitOnSlashChars_nonempty` | Split always produces ≥ 1 group |
+| `splitOnSlashChars_no_slash` | No segment contains `/` |
+| `filterEmpty_noEmpty` | No empty string in filtered output |
+| `filterEmpty_preserves` | Non-empty strings preserved |
+| `normalizePath_isNormalized` | Full pipeline → `IsNormalized` |
+| `normalizePath_resolveDots_idempotent` | `resolveDots` on normalized is identity |
+
+### Proof status summary
+
+The CertiClaw Lean model now has **18 proved theorems**:
+
+| Category | Count | Theorems |
+|----------|-------|----------|
+| Security (Theorems.lean) | 6 | effect/policy/approval/MCP/traversal/deny |
+| Normalization (NormalizeTheorems.lean) | 6 | noDot/noDotDot/noEmpty/idempotent/containment/traversal |
+| Frontend (PathFrontend.lean) | 6 | nonempty/noSlash/noEmpty/preserves/isNormalized/idempotent |
+
+**No significant proof gaps remain.** The entire lexical path pipeline
+from raw strings through to the clean segment representation used by
+the checker is formally verified.
+
+### Remaining non-goals
+
+- Filesystem semantics (symlinks, mount points) — intentionally out of scope
+- Verified extraction from Lean to OCaml
+- `String` ↔ `List Char` internal representation boundary (Lean stdlib concern)
+
+### Files changed
+
+| File | Status |
+|------|--------|
+| `formal/CertiClaw/PathFrontend.lean` | **New** |
+| `formal/CertiClaw.lean` | Updated (imports) |
+| `formal/README.md` | Updated |
+| `DEVLOG.md` | Updated |
+
+---
+
 ## Roadmap
 
 - [x] ~~Policy loading from JSON files~~ → Iteration 3
@@ -709,9 +773,10 @@ logic (dot resolution, containment) is fully proved.
 - [x] ~~Lean 4 mechanization of Theorems 1–6~~ → Iteration 5
 - [x] ~~OCaml ↔ Lean correspondence alignment~~ → Iteration 6
 - [x] ~~Verified normalization spec~~ → Iteration 7
-- [ ] Formalize string splitting (unify_separators, split_segments)
+- [x] ~~Verified path frontend~~ → Iteration 8
 - [ ] Real MCP transport (JSON-RPC)
 - [ ] Symlink / realpath resolution
 - [ ] File-based audit log persistence
+- [ ] Verified extraction (Lean → OCaml)
 - [ ] LLM integration: agent generates IR + proof from natural language
 - [ ] Richer IR variants (file copy, directory creation, git operations)

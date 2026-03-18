@@ -13,6 +13,9 @@ trusted core.  All six security theorems from
 | `CertiClaw/Policy.lean` | `lib/policy.ml` | `authorizeEffect`, `authorizeAll`, `pathContains`, `emptyPolicy` |
 | `CertiClaw/Check.lean` | `lib/check.ml` | `check : Policy → Certificate → Action → CheckResult` |
 | `CertiClaw/Theorems.lean` | `docs/formal-core.md` §6 | Six security theorems, all proved |
+| `CertiClaw/Normalize.lean` | `lib/path_check.ml` (`resolve_dots`) | `resolveDots`, `IsNormalized`, predicates |
+| `CertiClaw/NormalizeTheorems.lean` | — | Six normalization theorems, all proved |
+| `CertiClaw/PathFrontend.lean` | `lib/path_check.ml` (full pipeline) | `unifySepChars`, `splitOnSlashChars`, `filterEmpty`, `normalizePath` |
 
 ## What is Abstracted
 
@@ -108,7 +111,8 @@ lake build
 | Segment normalization | **Proved** | `resolveDots` proved to produce clean output (no `.`, `..`, `""`) |
 | Normalization idempotence | **Proved** | `resolveDots (resolveDots x) = resolveDots x` |
 | Traversal consumption | **Proved** | `".." ∉ resolveDots segs` |
-| Raw string → segments | **Open** | OCaml `split_segments`/`unify_separators` not modeled in Lean |
+| Raw string → segments | **Proved** | `unifySepChars`, `splitOnSlashChars`, `filterEmpty` modeled and proved |
+| Full pipeline | **Proved** | `normalizePath` = compose all steps; output is `IsNormalized` |
 | Verified extraction | **Open** | Lean model is standalone |
 
 ### Normalization specification (Iteration 7)
@@ -139,13 +143,31 @@ The Lean model now includes a normalization spec in two files:
 
 ### What is still not modeled
 
-The normalization spec operates on `List String` (segment lists).
-The OCaml pipeline has two additional steps before `resolve_dots`:
+### Path frontend (Iteration 8)
 
-1. **`unify_separators`** — replaces `\` with `/` in the raw string
-2. **`split_segments`** — splits on `/` and filters empty strings
+`PathFrontend.lean` models the full OCaml raw-string-to-segments pipeline:
 
-These string-level operations are not modeled in Lean. To fully
-close the gap, one would need to formalize string splitting and
-prove it produces the same segments that `resolveDotsGo` then
-processes. This is the remaining proof obligation.
+| Lean definition | OCaml counterpart | What it does |
+|-----------------|-------------------|-------------|
+| `unifySepChars` | `unify_separators` | Replace `\` with `/` in char list |
+| `splitOnSlashChars` | `String.split_on_char '/'` | Split on `/` into char groups |
+| `filterEmpty` | `List.filter (fun s -> s <> "")` | Remove empty segments |
+| `normalizePath` | `split_segments p \|> resolve_dots` | Full pipeline composition |
+
+**Proved properties:**
+
+| Theorem | Statement |
+|---------|-----------|
+| `splitOnSlashChars_nonempty` | Split always produces ≥ 1 group |
+| `splitOnSlashChars_no_slash` | No segment contains `/` |
+| `filterEmpty_noEmpty` | No empty string in filtered output |
+| `filterEmpty_preserves` | Non-empty strings preserved |
+| `normalizePath_isNormalized` | Full pipeline output is `IsNormalized` |
+| `normalizePath_resolveDots_idempotent` | `resolveDots` on normalized output is identity |
+
+### Remaining gap
+
+The lexical path frontend is **fully formalized**.  The only aspect not
+modeled is the `String` ↔ `List Char` boundary (Lean's internal string
+representation), which is a Lean standard library concern, not a
+CertiClaw concern.  Verified extraction from Lean to OCaml remains open.

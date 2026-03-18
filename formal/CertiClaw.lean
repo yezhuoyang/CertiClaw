@@ -7,3 +7,4 @@ import CertiClaw.Check
 import CertiClaw.Theorems
 import CertiClaw.Normalize
 import CertiClaw.NormalizeTheorems
+import CertiClaw.PathFrontend
