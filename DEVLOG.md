@@ -1,9 +1,9 @@
 # CertiClaw Developer Log
 
-> **Current state (2026-03-18):** 9 iterations complete. 13 OCaml library
-> modules, 75 unit tests, 12-case evaluation corpus with timing.
-> **18 machine-checked Lean 4 theorems.** Artifact scripts for
-> reproducible validation (tests + eval + proofs in one command).
+> **Current state (2026-03-18):** 10 iterations complete. 13 OCaml
+> modules, 75 unit tests, 29-case evaluation corpus (7 benign + 17 attack
+> + 5 scalability), **18 Lean 4 theorems**, Dockerfile, MIT license.
+> Submission-ready artifact with `./run_all.sh` one-command validation.
 > External deps: `yojson` (OCaml), Lean 4.28.0 (proofs).
 
 ---
@@ -819,18 +819,60 @@ Avg check time:   ~3 us
 
 ---
 
+## 2026-03-18 — Iteration 10: Submission Polish
+
+### Goal
+
+Polish into a submission-ready artifact with expanded evaluation,
+paper-ready outputs, reproducible packaging, and repository polish.
+
+### Evaluation expansion: 12 → 29 cases
+
+| Tier | Cases | Content |
+|------|-------|---------|
+| Tier 1 (core) | 12 | One per attack class + benign baselines |
+| Tier 2 (edge) | 12 | Path normalization edges, forgery variants, MCP combos, binary auth |
+| Scalability | 5 | Policies with 10/50/100/500/1000 entries |
+
+17 distinct attack classes blocked, 7 benign cases accepted, 5 scale tests.
+
+### Paper-ready output (`--summary`)
+
+Generates markdown tables for:
+- Attack classes blocked (17 rows)
+- Acceptance summary (benign/attack/scale)
+- Timing metrics (avg ~3.5 us per core case)
+- Scalability data (linear in policy size)
+
+### Reproducible packaging
+
+- **Dockerfile**: two-stage build (OCaml + Lean), runs full validation
+- **`run_all.sh`**: one-command local validation
+- **RELEASE_CHECKLIST.md**: step-by-step validation guide
+
+### Repository polish
+
+- **LICENSE**: MIT
+- **README**: expanded artifact quick-start with Docker instructions
+- **RELEASE_CHECKLIST.md**: expected outputs for each validation step
+
+### Files changed
+
+| File | Status |
+|------|--------|
+| `lib/eval_corpus.ml` | Expanded — 12 → 29 cases (tier 1 + tier 2 + scale) |
+| `eval/run_eval.ml` | Expanded — `--summary` flag, scale category, paper tables |
+| `Dockerfile` | **New** |
+| `LICENSE` | **New** — MIT |
+| `RELEASE_CHECKLIST.md` | **New** |
+| `README.md` | Updated — Docker, checklist link |
+| `DEVLOG.md` | Updated |
+
+---
+
 ## Roadmap
 
-- [x] ~~Policy loading from JSON files~~ → Iteration 3
-- [x] ~~Audit logging of all decisions~~ → Iteration 3
-- [x] ~~Formal specification~~ → Iteration 4
-- [x] ~~Explicit TCB boundary~~ → Iteration 4
-- [x] ~~Invariant-style tests~~ → Iteration 4
-- [x] ~~Lean 4 mechanization of Theorems 1–6~~ → Iteration 5
-- [x] ~~OCaml ↔ Lean correspondence alignment~~ → Iteration 6
-- [x] ~~Verified normalization spec~~ → Iteration 7
-- [x] ~~Verified path frontend~~ → Iteration 8
-- [x] ~~Evaluation harness and artifact packaging~~ → Iteration 9
+- [x] ~~All 10 implementation iterations complete~~
 - [ ] Real MCP transport (JSON-RPC)
 - [ ] Verified extraction (Lean → OCaml)
 - [ ] LLM integration

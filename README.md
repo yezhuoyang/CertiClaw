@@ -8,21 +8,26 @@ verified security properties.
 ```bash
 # Prerequisites: OCaml 5.x + dune + yojson, Lean 4.28.0
 
-# Run everything (tests + evaluation + proofs)
+# Full validation (tests + evaluation + proofs)
 ./run_all.sh
 
 # Or individually:
-./run_tests.sh          # 75 OCaml unit tests + 12-case evaluation corpus
-./run_proofs.sh         # 18 Lean 4 machine-checked theorems
+dune exec test/tests.exe            # 75 unit tests
+dune exec eval/run_eval.exe         # 29-case evaluation corpus
+dune exec eval/run_eval.exe -- --summary   # paper-ready tables
+cd formal && lake build             # 18 Lean theorems
 
-# Evaluation corpus with timing
-dune exec eval/run_eval.exe              # human-readable table
-dune exec eval/run_eval.exe -- --csv     # CSV output
-dune exec eval/run_eval.exe -- --json    # JSON lines output
+# Other output formats
+dune exec eval/run_eval.exe -- --csv       # CSV
+dune exec eval/run_eval.exe -- --json      # JSON lines
+dune exec bin/demo.exe -- --demo --audit-json  # demo with audit
 
-# Demo with audit log
-dune exec bin/demo.exe -- --demo --audit-json
+# Docker (fully reproducible)
+docker build -t certiclaw .
+docker run --rm certiclaw
 ```
+
+See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for detailed validation steps.
 
 ## Purpose
 
