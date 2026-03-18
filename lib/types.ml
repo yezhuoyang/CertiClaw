@@ -1,13 +1,22 @@
-(** CertiClaw core types.
+(** {1 CertiClaw Core Types}
 
-    This module defines the typed IR for agent actions, effects,
-    policies, approvals, proof certificates, and checker error types.
-    The trusted core reasons over these types — never over free-form
-    strings. *)
+    {b [TRUSTED CORE]} — This module defines the type language for the
+    entire system.  All security-relevant reasoning happens over these
+    types.  A bug here compromises the whole system.
 
-(* ------------------------------------------------------------------ *)
-(* Effects: what an action does to the outside world                   *)
-(* ------------------------------------------------------------------ *)
+    {2 Formal correspondence}
+
+    Each type here corresponds to a definition in [docs/formal-core.md]:
+    - [action]        ↔  Action syntax  (§1)
+    - [action_effect] ↔  Effect domain  (§2)
+    - [policy]        ↔  Policy         (§3)
+    - [proof]         ↔  Certificate    (§4)
+    - [check_error]   ↔  Error domain   (§5)
+    - [check_result]  ↔  Judgment output (§5) *)
+
+(* ================================================================== *)
+(* Effects                                                             *)
+(* ================================================================== *)
 
 (** A single observable side-effect of an action. *)
 type action_effect =
@@ -17,7 +26,7 @@ type action_effect =
   | NetTo     of string          (** Network access to a host *)
   | McpUse    of string * string (** MCP server × tool invocation *)
 
-(** Compare two effects for equality. *)
+(** Structural equality on effects. *)
 let action_effect_equal a b =
   match a, b with
   | ReadPath  x,    ReadPath  y    -> x = y
@@ -35,22 +44,24 @@ let show_action_effect = function
   | NetTo     h     -> "NetTo("     ^ h ^ ")"
   | McpUse (s, t)   -> "McpUse("    ^ s ^ ", " ^ t ^ ")"
 
-(* ------------------------------------------------------------------ *)
-(* Approval model                                                      *)
-(* ------------------------------------------------------------------ *)
+(* ================================================================== *)
+(* Approval                                                            *)
+(* ================================================================== *)
 
 (** Approval token for destructive actions. *)
 type approval =
   | NoApproval
   | ApprovedDestructive of string  (** reason / ticket id *)
 
-(* ------------------------------------------------------------------ *)
-(* Proof / certificate                                                 *)
-(* ------------------------------------------------------------------ *)
+(* ================================================================== *)
+(* Certificate (proof)                                                 *)
+(* ================================================================== *)
 
-(** A proof object that the agent supplies alongside an action.
-    The checker will verify that [claimed_effects] match the effects
-    inferred from the IR, and that approval is present when needed. *)
+(** A certificate that the agent supplies alongside an action.
+    The checker verifies [claimed_effects] against independently
+    inferred effects — it never trusts the certificate directly.
+
+    Corresponds to Certificate in §4 of formal-core.md. *)
 type proof = {
   claimed_effects : action_effect list;
   destructive     : bool;
@@ -58,49 +69,49 @@ type proof = {
   explanation     : string option;
 }
 
-(* ------------------------------------------------------------------ *)
+(* ================================================================== *)
 (* Policy                                                              *)
-(* ------------------------------------------------------------------ *)
+(* ================================================================== *)
 
-(** An authorization policy that constrains which effects are allowed. *)
+(** An authorization policy.  Corresponds to Policy in §3 of
+    formal-core.md.  All fields are allowlists; absence = deny. *)
 type policy = {
   readable_paths : string list;
   writable_paths : string list;
   allowed_bins   : string list;
   allowed_hosts  : string list;
-  allowed_mcp    : (string * string) list;  (** (server, tool) pairs *)
+  allowed_mcp    : (string * string) list;
 }
 
-(* ------------------------------------------------------------------ *)
-(* Typed IR for actions                                                *)
-(* ------------------------------------------------------------------ *)
+(* ================================================================== *)
+(* Action IR                                                           *)
+(* ================================================================== *)
 
-(** The structured intermediate representation for agent actions.
-    Every action the agent wants to perform must be expressed as one
-    of these variants — no arbitrary Bash strings pass through. *)
+(** Typed intermediate representation for agent actions.
+    Corresponds to Action in §1 of formal-core.md. *)
 type action =
   | GrepRecursive of {
-      pattern : string;  (** search pattern *)
-      root    : string;  (** directory to search *)
-      output  : string;  (** file to write results to *)
+      pattern : string;
+      root    : string;
+      output  : string;
     }
   | RemoveByGlob of {
-      root      : string;  (** base directory *)
-      suffix    : string;  (** file suffix / glob tail, e.g. ".tmp" *)
+      root      : string;
+      suffix    : string;
       recursive : bool;
     }
   | CurlToFile of {
-      url    : string;  (** full URL *)
-      host   : string;  (** hostname for policy check *)
-      output : string;  (** destination file *)
+      url    : string;
+      host   : string;
+      output : string;
     }
   | McpCall of {
-      server : string;  (** MCP server name *)
-      tool   : string;  (** tool name on that server *)
-      args   : string;  (** JSON-encoded arguments *)
+      server : string;
+      tool   : string;
+      args   : string;
     }
 
-(** Pretty-print an action (compact form for logs/demos). *)
+(** Pretty-print an action (compact form for logs). *)
 let show_action = function
   | GrepRecursive { pattern; root; output } ->
     Printf.sprintf "GrepRecursive { pattern=%S; root=%S; output=%S }"
@@ -115,13 +126,12 @@ let show_action = function
     Printf.sprintf "McpCall { server=%S; tool=%S; args=%S }"
       server tool args
 
-(* ------------------------------------------------------------------ *)
-(* Typed checker errors                                                *)
-(* ------------------------------------------------------------------ *)
+(* ================================================================== *)
+(* Checker errors                                                      *)
+(* ================================================================== *)
 
 (** Structured error type for checker rejections.
-    Each variant captures the specific reason for rejection so that
-    callers can match on error kind without parsing strings. *)
+    Corresponds to the error domain in §5 of formal-core.md. *)
 type check_error =
   | ClaimedEffectsMismatch
   | UnauthorizedRead     of string
@@ -132,7 +142,6 @@ type check_error =
   | MissingDestructiveApproval
   | PathTraversalBlocked of string
 
-(** Pretty-print a checker error for human consumption. *)
 let show_check_error = function
   | ClaimedEffectsMismatch ->
     "Claimed effects do not match inferred effects"
@@ -151,30 +160,45 @@ let show_check_error = function
   | PathTraversalBlocked p ->
     "Path traversal blocked: " ^ p
 
-(* ------------------------------------------------------------------ *)
+(* ================================================================== *)
 (* Checker result                                                      *)
-(* ------------------------------------------------------------------ *)
+(* ================================================================== *)
 
-(** Result of running the checker on an (action, proof, policy) triple. *)
+(** Result of the core check judgment.
+    Corresponds to the judgment output in §5 of formal-core.md. *)
 type check_result =
   | Accepted
-  | Rejected of check_error  (** structured rejection reason *)
+  | Rejected of check_error
 
-(* ------------------------------------------------------------------ *)
-(* Execution plan (dry-run output)                                     *)
-(* ------------------------------------------------------------------ *)
+(* ================================================================== *)
+(* Rendering / plan types  [SUPPORT — outside trusted core]            *)
+(* ================================================================== *)
 
 (** What the renderer produced for a validated action. *)
 type rendered_form =
   | BashCommand of string
   | McpRequest  of { server : string; tool : string; args : string }
 
-(** A structured execution plan returned by [Plan.plan] after a
-    successful check-and-render pass.  Contains everything needed
-    to inspect what would happen, without actually executing. *)
+(** A structured execution plan. *)
 type execution_plan = {
-  input_action    : action;
+  input_action     : action;
   inferred_effects : action_effect list;
-  rendered        : rendered_form;
-  dry_run         : bool;
+  rendered         : rendered_form;
+  dry_run          : bool;
 }
+
+(* ================================================================== *)
+(* Pipeline result  [SUPPORT — composes core + rendering]              *)
+(* ================================================================== *)
+
+(** Context preserved on rejection for audit / debugging. *)
+type rejection_context = {
+  rejected_action  : action;
+  inferred_effects : action_effect list;
+  claimed_effects  : action_effect list;
+}
+
+(** Structured pipeline result.  Returned by [Pipeline.run]. *)
+type pipeline_result =
+  | PipelineAccepted of execution_plan
+  | PipelineRejected of check_error * rejection_context

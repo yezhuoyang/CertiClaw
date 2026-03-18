@@ -1,8 +1,9 @@
-(** Audit logging.
+(** {1 Audit Logging}
 
-    Every check/execute decision produces an {!audit_record}.
-    Records can be formatted as human-readable text or JSON lines
-    for machine consumption. *)
+    {b [SUPPORT]} — Every check/execute decision produces an
+    {!audit_record}.  Records can be formatted as human-readable text
+    or JSON lines for machine consumption.  A bug here cannot cause
+    an unauthorized action to pass {!Check.check}. *)
 
 open Types
 

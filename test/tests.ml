@@ -606,6 +606,182 @@ let test_audit_json_format () =
      !idx)
 
 (* ================================================================== *)
+(* SECTION 8: Core invariant tests (formal theorem witnesses)         *)
+(* ================================================================== *)
+
+(** All actions we test invariants over. *)
+let all_test_actions = [
+  GrepRecursive { pattern = "x"; root = "/home/user/src"; output = "/tmp/out" };
+  RemoveByGlob  { root = "/tmp"; suffix = ".log"; recursive = true };
+  CurlToFile    { url = "https://example.com/f"; host = "example.com";
+                  output = "/tmp/f" };
+  McpCall       { server = "files"; tool = "read_file"; args = "{}" };
+  McpCall       { server = "search"; tool = "query"; args = "{}" };
+  GrepRecursive { pattern = "y"; root = "/home/user/src/lib";
+                  output = "/home/user/src/out" };
+  CurlToFile    { url = "https://evil.com/x"; host = "evil.com";
+                  output = "/tmp/x" };
+  McpCall       { server = "files"; tool = "delete_file"; args = "{}" };
+]
+
+(** Make a correct proof for an action. *)
+let correct_proof action =
+  let effects = infer_effects action in
+  let destr = Certiclaw.Infer.is_destructive action in
+  let approval = if destr
+    then Some (ApprovedDestructive "test")
+    else None
+  in
+  { claimed_effects = effects; destructive = destr;
+    approval; explanation = None }
+
+(** Theorem 1 witness: if check succeeds, claimed = inferred. *)
+let test_invariant_effect_soundness () =
+  List.iter (fun action ->
+    let proof = correct_proof action in
+    match check ~policy:test_policy ~proof ~action with
+    | Accepted ->
+      let inferred = infer_effects action in
+      assert_true "claimed = inferred on accept"
+        (Certiclaw.Check.effects_match proof.claimed_effects inferred)
+    | Rejected _ -> ()  (* rejected is fine — not testing acceptance *)
+  ) all_test_actions
+
+(** Theorem 2 witness: if check succeeds, all effects authorized. *)
+let test_invariant_policy_soundness () =
+  List.iter (fun action ->
+    let proof = correct_proof action in
+    match check ~policy:test_policy ~proof ~action with
+    | Accepted ->
+      let inferred = infer_effects action in
+      List.iter (fun eff ->
+        assert_true
+          ("effect authorized: " ^ show_action_effect eff)
+          (Certiclaw.Policy.authorize_effect test_policy eff = None)
+      ) inferred
+    | Rejected _ -> ()
+  ) all_test_actions
+
+(** Theorem 3 witness: if check succeeds and action is destructive,
+    approval is present. *)
+let test_invariant_approval_soundness () =
+  List.iter (fun action ->
+    let proof = correct_proof action in
+    match check ~policy:test_policy ~proof ~action with
+    | Accepted ->
+      if Certiclaw.Infer.is_destructive action then
+        (match proof.approval with
+         | Some (ApprovedDestructive _) -> ()
+         | _ -> failwith "destructive accepted without approval")
+    | Rejected _ -> ()
+  ) all_test_actions
+
+(** Theorem 3 negative: destructive without approval always fails. *)
+let test_invariant_destructive_requires_approval () =
+  List.iter (fun action ->
+    if Certiclaw.Infer.is_destructive action then begin
+      let effects = infer_effects action in
+      let proof = { claimed_effects = effects; destructive = true;
+                    approval = None; explanation = None } in
+      match check ~policy:test_policy ~proof ~action with
+      | Rejected MissingDestructiveApproval -> ()
+      | Rejected _ -> ()  (* might fail for other reasons first *)
+      | Accepted -> failwith "destructive without approval accepted"
+    end
+  ) all_test_actions
+
+(** Theorem 1 negative: wrong claimed effects always fails. *)
+let test_invariant_mismatch_always_rejects () =
+  List.iter (fun action ->
+    (* Supply a truncated effect list *)
+    let inferred = infer_effects action in
+    if List.length inferred > 1 then begin
+      let wrong = [List.hd inferred] in
+      let proof = { claimed_effects = wrong; destructive = false;
+                    approval = None; explanation = None } in
+      assert_rejected_with ClaimedEffectsMismatch
+        (check ~policy:test_policy ~proof ~action)
+    end
+  ) all_test_actions
+
+(** Theorem 4 witness: MCP with unauthorized tool always rejects. *)
+let test_invariant_unauthorized_mcp_rejects () =
+  let bad_mcp_actions = [
+    McpCall { server = "files"; tool = "delete_file"; args = "{}" };
+    McpCall { server = "unknown"; tool = "anything"; args = "{}" };
+  ] in
+  List.iter (fun action ->
+    let effects = infer_effects action in
+    let proof = { claimed_effects = effects; destructive = false;
+                  approval = None; explanation = None } in
+    match check ~policy:test_policy ~proof ~action with
+    | Rejected (UnauthorizedMcpTool _) -> ()
+    | Rejected _ -> failwith "wrong rejection for bad MCP"
+    | Accepted -> failwith "unauthorized MCP accepted"
+  ) bad_mcp_actions
+
+(** Theorem 6: empty policy rejects all actions with effects. *)
+let test_invariant_empty_policy_denies_all () =
+  let empty = Certiclaw.Policy_load.empty_policy in
+  List.iter (fun action ->
+    let effects = infer_effects action in
+    if effects <> [] then begin
+      let proof = correct_proof action in
+      assert_rejected (check ~policy:empty ~proof ~action)
+    end
+  ) all_test_actions
+
+(* ================================================================== *)
+(* SECTION 9: Pipeline result type tests                              *)
+(* ================================================================== *)
+
+let test_pipeline_accepted () =
+  let action = GrepRecursive {
+    pattern = "TODO"; root = "/home/user/src"; output = "/tmp/out";
+  } in
+  let proof = correct_proof action in
+  match Certiclaw.Pipeline.run ~policy:test_policy ~proof action with
+  | PipelineAccepted plan ->
+    assert_true "plan has effects" (List.length plan.inferred_effects > 0);
+    assert_true "plan is dry-run" plan.dry_run
+  | PipelineRejected _ ->
+    failwith "Expected PipelineAccepted"
+
+let test_pipeline_rejected_preserves_context () =
+  let action = CurlToFile {
+    url = "https://evil.com/x"; host = "evil.com"; output = "/tmp/x";
+  } in
+  let proof = correct_proof action in
+  match Certiclaw.Pipeline.run ~policy:test_policy ~proof action with
+  | PipelineAccepted _ ->
+    failwith "Expected PipelineRejected"
+  | PipelineRejected (err, ctx) ->
+    assert_true "error is UnauthorizedHost"
+      (err = UnauthorizedHost "evil.com");
+    assert_true "context has action"
+      (ctx.rejected_action = action);
+    assert_true "context has inferred effects"
+      (List.length ctx.inferred_effects > 0);
+    assert_true "context has claimed effects"
+      (List.length ctx.claimed_effects > 0)
+
+let test_pipeline_mismatch_preserves_context () =
+  let action = GrepRecursive {
+    pattern = "x"; root = "/home/user/src"; output = "/tmp/out";
+  } in
+  let proof = { claimed_effects = [ReadPath "/home/user/src"];
+                destructive = false; approval = None; explanation = None } in
+  match Certiclaw.Pipeline.run ~policy:test_policy ~proof action with
+  | PipelineAccepted _ -> failwith "Expected PipelineRejected"
+  | PipelineRejected (err, ctx) ->
+    assert_true "error is ClaimedEffectsMismatch"
+      (err = ClaimedEffectsMismatch);
+    assert_true "context has 3 inferred effects"
+      (List.length ctx.inferred_effects = 3);
+    assert_true "context has 1 claimed effect"
+      (List.length ctx.claimed_effects = 1)
+
+(* ================================================================== *)
 (* Runner                                                              *)
 (* ================================================================== *)
 
@@ -677,6 +853,20 @@ let () =
   run_test "audit record rejected"             test_audit_record_rejected;
   run_test "audit log collects"                test_audit_log_collects;
   run_test "audit JSON format"                 test_audit_json_format;
+
+  Printf.printf "\n  -- Core invariants (theorem witnesses) --\n";
+  run_test "inv: effect soundness"             test_invariant_effect_soundness;
+  run_test "inv: policy soundness"             test_invariant_policy_soundness;
+  run_test "inv: approval soundness"           test_invariant_approval_soundness;
+  run_test "inv: destructive requires approval" test_invariant_destructive_requires_approval;
+  run_test "inv: mismatch always rejects"      test_invariant_mismatch_always_rejects;
+  run_test "inv: unauthorized MCP rejects"     test_invariant_unauthorized_mcp_rejects;
+  run_test "inv: empty policy denies all"      test_invariant_empty_policy_denies_all;
+
+  Printf.printf "\n  -- Pipeline result --\n";
+  run_test "pipeline accepted"                 test_pipeline_accepted;
+  run_test "pipeline rejected preserves ctx"   test_pipeline_rejected_preserves_context;
+  run_test "pipeline mismatch preserves ctx"   test_pipeline_mismatch_preserves_context;
 
   Printf.printf "\n  Results: %d passed, %d failed\n\n" !passed !failed;
   if !failed > 0 then exit 1

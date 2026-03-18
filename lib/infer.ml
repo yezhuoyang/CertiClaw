@@ -1,13 +1,17 @@
-(** Effect inference.
+(** {1 Effect Inference}
 
-    Given a typed IR action, compute the complete list of effects it
-    would produce.  This is the ground truth — the checker always
-    recomputes effects from the IR rather than trusting the proof. *)
+    {b [TRUSTED CORE]} — Given a typed IR action, compute the complete
+    list of effects it would produce.  This is the ground truth — the
+    checker always recomputes effects from the IR rather than trusting
+    the certificate.
+
+    {2 Formal correspondence}
+    Implements the ⟦·⟧ function from §2 of formal-core.md. *)
 
 open Types
 
-(** Infer the effects of [action].  The returned list is deterministic
-    and does not depend on the proof. *)
+(** [infer_effects action] returns the deterministic effect list for
+    [action].  Does not depend on the certificate. *)
 let infer_effects (action : action) : action_effect list =
   match action with
   | GrepRecursive { pattern = _; root; output } ->
@@ -24,7 +28,10 @@ let infer_effects (action : action) : action_effect list =
   | McpCall { server; tool; args = _ } ->
     [ McpUse (server, tool) ]
 
-(** Is an action destructive?  Currently only [RemoveByGlob] counts. *)
+(** [is_destructive action] is [true] iff [action] requires explicit
+    approval.  Currently only [RemoveByGlob] qualifies.
+
+    Corresponds to the {i destructive} predicate in §2. *)
 let is_destructive (action : action) : bool =
   match action with
   | RemoveByGlob _ -> true

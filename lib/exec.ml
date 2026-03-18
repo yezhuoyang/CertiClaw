@@ -1,13 +1,12 @@
-(** Executor module.
+(** {1 Executor}
 
-    Provides a clean pipeline:  check → render → execute.
+    {b [SUPPORT]} — Provides the check → render → execute pipeline.
     The executor NEVER runs an action that has not been validated.
+    A bug in this module cannot cause an unauthorized action to pass
+    {!Check.check}.
 
-    By default, execution is simulated (dry-run).  A real executor
-    would call [Sys.command] or invoke an MCP transport; those are
-    out of scope for this MVP.
-
-    All decisions are recorded in an optional {!Audit.audit_log}. *)
+    By default, execution is simulated (dry-run).  All decisions are
+    recorded in an optional {!Audit.audit_log}. *)
 
 open Types
 

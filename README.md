@@ -144,20 +144,50 @@ Both accepted and rejected actions are logged.
 
 ## Trusted Computing Base
 
-The security-critical code is:
+The security-critical code ("trusted core") is explicitly tagged with
+`[TRUSTED CORE]` in module doc comments.  The `Core` facade module
+re-exports exactly the TCB:
 
-| Module | Lines | What it does |
-|--------|-------|-------------|
-| `types.ml` | ~160 | Defines the type language |
-| `path_check.ml` | ~80 | Path normalization + containment |
-| `infer.ml` | ~30 | Effect inference |
-| `policy.ml` | ~40 | Authorization checks |
-| `check.ml` | ~50 | Certificate validation |
-| **Total** | **~360** | |
+| Module | Tag | Lines | Role |
+|--------|-----|-------|------|
+| `types.ml` (core section) | TRUSTED CORE | ~130 | Type definitions |
+| `path_check.ml` | TRUSTED CORE | ~80 | Path normalization + containment |
+| `infer.ml` | TRUSTED CORE | ~35 | Effect inference |
+| `policy.ml` | TRUSTED CORE | ~45 | Per-effect authorization |
+| `check.ml` | TRUSTED CORE | ~50 | Certificate validation |
+| **Total TCB** | | **~340** | |
 
-Everything else (rendering, execution, policy loading, audit, CLI) is
-outside the trusted core. A bug in those modules cannot cause an
-unauthorized action to pass the checker.
+Everything outside the TCB is tagged `[SUPPORT]`:
+
+| Module | Tag | Role |
+|--------|-----|------|
+| `render.ml` | SUPPORT | Bash rendering |
+| `pipeline.ml` | SUPPORT | Structured pipeline result |
+| `plan.ml` | SUPPORT | Execution plan builder |
+| `exec.ml` | SUPPORT | Check → render → execute |
+| `audit.ml` | SUPPORT | Audit record formatting |
+| `policy_load.ml` | SUPPORT | JSON policy file parsing |
+| `core.ml` | facade | Re-exports TCB modules |
+
+**Why this separation matters:** A bug in any SUPPORT module cannot
+cause an unauthorized action to pass `Check.check`.  The checker's
+correctness depends only on the five TCB modules.  This makes the
+security argument tractable: instead of auditing ~2000 lines, you
+audit ~340 lines.  The TCB aligns with the formal specification in
+[`docs/formal-core.md`](docs/formal-core.md).
+
+## Formal Specification
+
+[`docs/formal-core.md`](docs/formal-core.md) defines the formal model:
+- Syntax of actions and effects (§1–2)
+- Policy authorization judgment (§3)
+- Certificate structure (§4)
+- Check judgment with four-step rule (§5)
+- Six security theorems targeted for Coq/Lean mechanization (§6)
+- TCB summary and mechanization roadmap (§7–8)
+
+Each definition corresponds directly to OCaml code.  Invariant-style
+tests in the test suite serve as witnesses for the theorems.
 
 ## Building
 
@@ -172,7 +202,7 @@ export OCAMLLIB="C:/Users/yezhu/AppData/Local/opam/default/lib/ocaml"
 # Build everything
 dune build
 
-# Run tests (52 tests)
+# Run tests (62 tests)
 dune exec test/tests.exe
 
 # Run demo
@@ -181,7 +211,7 @@ dune exec bin/demo.exe -- --demo
 
 ## Test Coverage
 
-52 tests organized in sections:
+62 tests organized in sections:
 
 | Section | Count | Covers |
 |---------|-------|--------|
@@ -192,6 +222,8 @@ dune exec bin/demo.exe -- --demo
 | Plan module | 2 | Successful plan, rejected plan |
 | Policy loading | 8 | Valid file, missing fields, malformed JSON, wrong types, bad MCP, not-object, file-not-found, deny-by-default |
 | Audit logging | 4 | Accepted record, rejected record, log collection, JSON format |
+| **Core invariants** | **7** | **Theorem witnesses: effect soundness, policy soundness, approval soundness, destructive gate, mismatch rejection, MCP authorization, default deny** |
+| Pipeline result | 3 | Accepted plan, rejected with context, mismatch with context |
 
 ## Non-Goals
 

@@ -1,10 +1,11 @@
-(** Bash rendering for IR actions.
+(** {1 Bash Rendering}
 
-    Converts validated IR nodes into shell command strings.
-    McpCall does NOT render to Bash — it is handled separately.
+    {b [SUPPORT]} — Converts validated IR nodes into shell commands.
+    McpCall produces a structured [McpRequest] instead.
 
     IMPORTANT: This module should only be called on actions that have
-    already passed the checker. *)
+    already passed the checker.  A bug here cannot cause an
+    unauthorized action to pass {!Check.check}. *)
 
 open Types
 

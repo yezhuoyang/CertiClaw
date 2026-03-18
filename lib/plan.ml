@@ -1,8 +1,8 @@
-(** Structured dry-run execution plan.
+(** {1 Execution Plans}
 
-    [plan] runs the check-and-render pipeline and returns a structured
-    [execution_plan] on success, or a [check_error] on failure.
-    It never executes anything.
+    {b [SUPPORT]} — Runs the check-and-render pipeline and returns a
+    structured [execution_plan] on success, or a [check_error] on
+    failure.  Never executes anything.
 
     If an audit log is provided, both accepted and rejected decisions
     are recorded. *)

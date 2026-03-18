@@ -1,10 +1,10 @@
 # CertiClaw Developer Log
 
-> **Current state (2026-03-18):** 3 iterations complete. 10 library modules,
-> 52 passing tests, 1 CLI executable. Trusted core covers typed IR,
-> effect inference, segment-based path checking, typed error reporting,
-> and structured execution plans. Policy loaded from JSON files.
-> Every decision is recorded in a structured audit log.
+> **Current state (2026-03-18):** 4 iterations complete. 12 library modules,
+> 62 passing tests, 1 CLI executable. Trusted core (5 modules, ~340 LOC)
+> is explicitly isolated with `[TRUSTED CORE]` tags and a `Core` facade.
+> Formal specification in `docs/formal-core.md` defines 6 security theorems.
+> Invariant-style tests serve as theorem witnesses.
 > External dependency: `yojson` (for policy file parsing).
 
 ---
@@ -290,15 +290,160 @@ Example: `dune exec bin/demo.exe -- --demo --policy examples/policy.json --audit
 
 ---
 
+## 2026-03-18 — Iteration 4: Formal Core Alignment
+
+### Goal
+
+Stabilize the formal core before adding more runtime features.  Make
+the trusted computing base explicit, write a formal specification that
+matches the code, and add invariant-style tests that witness the
+security theorems.
+
+### 1. Explicit TCB boundary
+
+All modules now carry either `[TRUSTED CORE]` or `[SUPPORT]` in their
+top-level doc comment.
+
+**Trusted core (5 modules, ~340 LOC):**
+
+| Module | Role |
+|--------|------|
+| `types.ml` (core section) | Type definitions — action, effect, policy, proof, check_error |
+| `path_check.ml` | Path normalization + segment-based containment |
+| `infer.ml` | Deterministic effect inference |
+| `policy.ml` | Per-effect authorization |
+| `check.ml` | Four-step certificate validation judgment |
+
+**Support (7 modules):**
+
+| Module | Role |
+|--------|------|
+| `render.ml` | Bash rendering |
+| `pipeline.ml` | Structured pipeline result type |
+| `plan.ml` | Execution plan builder |
+| `exec.ml` | Check → render → execute |
+| `audit.ml` | Audit record formatting |
+| `policy_load.ml` | JSON policy file parsing |
+| `core.ml` | Re-exports exactly the TCB |
+
+**Why it matters:** A bug in any SUPPORT module cannot cause an
+unauthorized action to pass `Check.check`.  The security argument
+depends only on auditing ~340 lines, not ~2000.
+
+### 2. Pipeline result type (`pipeline.ml` — new)
+
+```ocaml
+type rejection_context = {
+  rejected_action  : action;
+  inferred_effects : action_effect list;
+  claimed_effects  : action_effect list;
+}
+
+type pipeline_result =
+  | PipelineAccepted of execution_plan
+  | PipelineRejected of check_error * rejection_context
+```
+
+`Pipeline.run` composes check + render into a single result.  Rejected
+paths preserve full context (action, inferred effects, claimed effects)
+for audit output — no information is lost.
+
+### 3. Core facade (`core.ml` — new)
+
+Re-exports exactly the five TCB modules:
+```ocaml
+module Types      = Types
+module Path_check = Path_check
+module Infer      = Infer
+module Policy     = Policy
+module Check      = Check
+```
+
+If a security property can be stated using only `Core.*` names, then
+proving it depends only on the TCB.
+
+### 4. Formal specification (`docs/formal-core.md` — new)
+
+Defines the formal model in 8 sections:
+
+| Section | Content |
+|---------|---------|
+| §1 | Action syntax |
+| §2 | Effect domain + inference function ⟦·⟧ + destructive predicate |
+| §3 | Policy, path normalization, containment, per-effect authorization |
+| §4 | Certificate structure |
+| §5 | Check judgment (four sequential steps) + error domain |
+| §6 | Six security theorems (targets for mechanization) |
+| §7 | TCB summary |
+| §8 | Mechanization roadmap |
+
+**Security theorems defined:**
+
+1. **Effect soundness** — if accepted, claimed = inferred
+2. **Policy soundness** — if accepted, all effects authorized
+3. **Approval soundness** — if accepted and destructive, approval present
+4. **MCP authorization soundness** — if accepted and McpCall, tool in policy
+5. **Path traversal safety** — if accepted, no effects contain ".."
+6. **Default deny** — empty policy rejects all non-trivial actions
+
+### 5. Invariant-style tests: 52 → 62
+
+| New test | Witnesses |
+|----------|-----------|
+| `inv: effect soundness` | Theorem 1 — over 8 actions |
+| `inv: policy soundness` | Theorem 2 — over 8 actions |
+| `inv: approval soundness` | Theorem 3 — over 8 actions |
+| `inv: destructive requires approval` | Theorem 3 negative |
+| `inv: mismatch always rejects` | Theorem 1 negative |
+| `inv: unauthorized MCP rejects` | Theorem 4 |
+| `inv: empty policy denies all` | Theorem 6 |
+| `pipeline accepted` | Pipeline result type |
+| `pipeline rejected preserves ctx` | Rejection context preservation |
+| `pipeline mismatch preserves ctx` | Context on mismatch |
+
+Tests iterate over a list of 8 diverse actions and check invariants
+that must hold for all of them — not just one example.
+
+### 6. Module doc comments
+
+All 12 modules updated with:
+- `[TRUSTED CORE]` or `[SUPPORT]` tag
+- `{2 Formal correspondence}` section linking to formal-core.md sections
+- Clear statement of what a bug in this module can/cannot break
+
+### Files changed in iteration 4
+
+| File | Status | What changed |
+|------|--------|-------------|
+| `lib/types.ml` | Modified | Added formal-core refs, `pipeline_result`, `rejection_context` |
+| `lib/infer.ml` | Modified | TCB tag, formal correspondence |
+| `lib/path_check.ml` | Modified | TCB tag, formal correspondence |
+| `lib/policy.ml` | Modified | TCB tag, formal correspondence |
+| `lib/check.ml` | Modified | TCB tag, formal correspondence, step comments |
+| `lib/render.ml` | Modified | SUPPORT tag |
+| `lib/plan.ml` | Modified | SUPPORT tag |
+| `lib/exec.ml` | Modified | SUPPORT tag |
+| `lib/audit.ml` | Modified | SUPPORT tag |
+| `lib/core.ml` | **New** | TCB facade module |
+| `lib/pipeline.ml` | **New** | Structured pipeline result |
+| `docs/formal-core.md` | **New** | Formal specification (8 sections) |
+| `test/tests.ml` | Expanded | 52 → 62 tests (invariants + pipeline) |
+| `README.md` | Updated | TCB boundary, formal spec link, test table |
+
+---
+
 ## Roadmap
 
 - [x] ~~Policy loading from JSON files~~ → Iteration 3
 - [x] ~~Audit logging of all decisions~~ → Iteration 3
+- [x] ~~Formal specification~~ → Iteration 4
+- [x] ~~Explicit TCB boundary~~ → Iteration 4
+- [x] ~~Invariant-style tests~~ → Iteration 4
+- [ ] Coq or Lean mechanization of Theorems 1–6
 - [ ] Real MCP transport (JSON-RPC)
 - [ ] Symlink / realpath resolution
 - [ ] File-based audit log persistence
 - [ ] Policy hot-reload
-- [ ] Formal verification of checker properties in Coq or Lean
 - [ ] LLM integration: agent generates IR + proof from natural language
 - [ ] Richer IR variants (file copy, directory creation, git operations)
 - [ ] Native compilation (fix mingw toolchain on Windows)

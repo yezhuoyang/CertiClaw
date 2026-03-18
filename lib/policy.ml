@@ -1,17 +1,20 @@
-(** Policy authorization.
+(** {1 Policy Authorization}
 
-    Check whether every effect in a list is permitted by a given
-    policy.  Path containment uses segment-based logic with
-    normalization (see {!Path_check}). *)
+    {b [TRUSTED CORE]} — Check whether every effect in a list is
+    permitted by a given policy.  Path containment uses segment-based
+    logic with normalization (see {!Path_check}).
+
+    {2 Formal correspondence}
+    Implements the {i authorized}(π, e) judgment from §3 of
+    formal-core.md, and the {i all-authorized}(π, E) lifting. *)
 
 open Types
 
-(* ------------------------------------------------------------------ *)
-(* Per-effect authorization                                            *)
-(* ------------------------------------------------------------------ *)
+(** [authorize_effect pol eff] returns [None] if [eff] is authorized
+    by [pol], or [Some check_error] if denied.
 
-(** Check a single effect against the policy.
-    Returns [None] if authorized, or [Some check_error] if denied. *)
+    Paths with ".." segments are rejected immediately with
+    [PathTraversalBlocked] before containment is checked. *)
 let authorize_effect (pol : policy) (eff : action_effect) : check_error option =
   match eff with
   | ReadPath p ->
@@ -34,8 +37,7 @@ let authorize_effect (pol : policy) (eff : action_effect) : check_error option =
     if List.mem (s, t) pol.allowed_mcp then None
     else Some (UnauthorizedMcpTool (s, t))
 
-(** Authorize every effect in [effects] against [pol].
-    Returns the first denial error, or [None] if all pass. *)
+(** [authorize_all pol effects] returns the first denial, or [None]. *)
 let authorize_all (pol : policy) (effects : action_effect list)
   : check_error option =
   let rec go = function
