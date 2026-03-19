@@ -92,19 +92,21 @@ let process_request json_str policy =
       let result = Certiclaw.Check.check ~policy ~proof:cert ~action in
       match result with
       | Rejected err ->
-        Printf.sprintf
-          {|{"status":"rejected","error":"%s","error_type":"%s","action":"%s"}|}
-          (String.escaped (show_check_error err))
-          (match err with
-           | ClaimedEffectsMismatch -> "ClaimedEffectsMismatch"
-           | UnauthorizedRead _ -> "UnauthorizedRead"
-           | UnauthorizedWrite _ -> "UnauthorizedWrite"
-           | UnauthorizedBinary _ -> "UnauthorizedBinary"
-           | UnauthorizedHost _ -> "UnauthorizedHost"
-           | UnauthorizedMcpTool _ -> "UnauthorizedMcpTool"
-           | MissingDestructiveApproval -> "MissingDestructiveApproval"
-           | PathTraversalBlocked _ -> "PathTraversalBlocked")
-          (String.escaped (show_action action))
+        let err_type = match err with
+          | ClaimedEffectsMismatch -> "ClaimedEffectsMismatch"
+          | UnauthorizedRead _ -> "UnauthorizedRead"
+          | UnauthorizedWrite _ -> "UnauthorizedWrite"
+          | UnauthorizedBinary _ -> "UnauthorizedBinary"
+          | UnauthorizedHost _ -> "UnauthorizedHost"
+          | UnauthorizedMcpTool _ -> "UnauthorizedMcpTool"
+          | MissingDestructiveApproval -> "MissingDestructiveApproval"
+          | PathTraversalBlocked _ -> "PathTraversalBlocked"
+        in
+        Yojson.Basic.to_string (`Assoc [
+          ("status", `String "rejected");
+          ("error", `String (show_check_error err));
+          ("error_type", `String err_type);
+          ("action", `String (show_action action)) ])
       | Accepted ->
         let rendered = Certiclaw.Render.render action in
         (* Execute the action *)
@@ -113,19 +115,25 @@ let process_request json_str policy =
         in
         match exec_result with
         | Certiclaw.Exec.ExecOk output ->
-          Printf.sprintf
-            {|{"status":"executed","rendered":"%s","output":"%s"}|}
-            (String.escaped (show_rendered rendered))
-            (String.escaped (if String.length output > 2000
-                             then String.sub output 0 2000 ^ "..."
-                             else output))
+          let out = if String.length output > 2000
+                    then String.sub output 0 2000 ^ "..."
+                    else output in
+          (* Use Yojson for proper JSON escaping *)
+          let json = `Assoc [
+            ("status", `String "executed");
+            ("rendered", `String (show_rendered rendered));
+            ("output", `String out);
+          ] in
+          Yojson.Basic.to_string json
         | Certiclaw.Exec.ExecBlocked _ ->
-          Printf.sprintf {|{"status":"error","error":"Blocked after accept (bug)"}|}
+          Yojson.Basic.to_string (`Assoc [
+            ("status", `String "error");
+            ("error", `String "Blocked after accept (bug)") ])
         | Certiclaw.Exec.ExecError msg ->
-          Printf.sprintf
-            {|{"status":"exec_error","rendered":"%s","error":"%s"}|}
-            (String.escaped (show_rendered rendered))
-            (String.escaped msg)
+          Yojson.Basic.to_string (`Assoc [
+            ("status", `String "exec_error");
+            ("rendered", `String (show_rendered rendered));
+            ("error", `String msg) ])
   with exn ->
     Printf.sprintf
       {|{"status":"error","error":"Exception: %s"}|}
@@ -144,7 +152,7 @@ let () =
         policy_path (Certiclaw.Policy_load.show_policy_load_error e);
       exit 1
   in
-  Printf.eprintf "[CertiClaw checker ready, policy: %s]\n%!" policy_path;
+  Printf.eprintf "[CertiClaw checker ready, policy loaded: %s]\n%!" policy_path;
 
   (* Read JSON lines from stdin, process each *)
   try while true do
