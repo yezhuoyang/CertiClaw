@@ -1,17 +1,14 @@
 /-
   CertiClaw Formal Model — Effect Inference
 
-  Corresponds to lib/infer.ml and §2 of docs/formal-core.md.
-  Defines the total function `infer` and the `isDestructive` predicate.
+  Corresponds to lib/infer.ml. All 7 action variants covered.
 -/
 
 import CertiClaw.Types
 
 namespace CertiClaw
 
-/-- Deterministic effect inference from an action.
-    The checker always recomputes this — it never trusts the certificate.
-    Corresponds to OCaml `Infer.infer_effects`. -/
+/-- Deterministic effect inference. Covers all 7 action variants. -/
 def infer (a : Action) : List Effect :=
   match a with
   | .grepRecursive _pattern root output =>
@@ -22,10 +19,14 @@ def infer (a : Action) : List Effect :=
       [.execBin "curl", .netTo host, .writePath output]
   | .mcpCall server tool _args =>
       [.mcpUse server tool]
+  | .readFile path =>
+      [.readPath path]
+  | .writeFile path _content =>
+      [.writePath path]
+  | .listDir path =>
+      [.readPath path]
 
-/-- Is an action destructive (requires explicit approval)?
-    Currently only `removeByGlob` qualifies.
-    Corresponds to OCaml `Infer.is_destructive`. -/
+/-- Is an action destructive? Only removeByGlob qualifies. -/
 def isDestructive (a : Action) : Bool :=
   match a with
   | .removeByGlob .. => true

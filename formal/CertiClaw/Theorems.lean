@@ -9,6 +9,8 @@ import CertiClaw.Types
 import CertiClaw.Infer
 import CertiClaw.Policy
 import CertiClaw.Check
+import CertiClaw.Normalize
+import CertiClaw.NormalizeTheorems
 
 namespace CertiClaw
 
@@ -142,14 +144,26 @@ theorem mcp_authorization_soundness
 -- Theorem 5: Path Traversal Safety (by construction)
 -- ═══════════════════════════════════════════════════════════════════
 
-/-- In this formal model, paths are `List String` (pre-normalized
-    segment lists).  Path traversal ("..") does not exist at the type
-    level — it is impossible by construction.
+/-- Theorem 5: Path traversal safety.
 
-    §6 Theorem 5 of formal-core.md. -/
-theorem path_traversal_safety :
-    ∀ (_p : Path), True :=
-  fun _ => trivial
+    The normalization pipeline (resolveDots) guarantees that ".."
+    never appears in normalized paths. Since all paths entering the
+    checker are assumed to be normalized (via normalizePath), no
+    effect produced by infer can contain ".." in a path position
+    IF the input action uses normalized paths.
+
+    This theorem connects the normalization guarantee to the effect
+    inference: for any action whose path fields are normalized (i.e.,
+    produced by resolveDots), the inferred ReadPath/WritePath effects
+    also contain no "..".
+
+    We state this as: resolveDots output never contains "..".
+    This is the substantive content — it is proved in
+    NormalizeTheorems.lean as resolveDots_noDotDot. We re-export
+    it here for completeness. -/
+theorem path_traversal_safety (segs : List String) :
+    ".." ∉ resolveDots segs :=
+  resolveDots_noDotDot segs
 
 -- ═══════════════════════════════════════════════════════════════════
 -- Theorem 6: Default Deny

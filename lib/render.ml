@@ -6,8 +6,13 @@
 
 open Types
 
+(** Shell-safe quoting.  Rejects null bytes to prevent C-level
+    truncation attacks (null byte injection). *)
 let shell_quote s =
-  "'" ^ String.concat "'\\''" (String.split_on_char '\'' s) ^ "'"
+  if String.contains s '\x00' then
+    failwith "shell_quote: null byte in argument (rejected for safety)"
+  else
+    "'" ^ String.concat "'\\''" (String.split_on_char '\'' s) ^ "'"
 
 let render (action : action) : rendered_form =
   match action with
