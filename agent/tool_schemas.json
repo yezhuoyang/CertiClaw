@@ -1,0 +1,109 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "grep_recursive",
+      "description": "Search files recursively for a pattern and write results to a file. The root directory must be readable and the output file must be writable per the active policy.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {"type": "string", "description": "The search pattern (literal string or regex)"},
+          "root": {"type": "string", "description": "Absolute path to the directory to search"},
+          "output": {"type": "string", "description": "Absolute path to write the search results"}
+        },
+        "required": ["pattern", "root", "output"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "remove_by_glob",
+      "description": "Delete files matching a suffix pattern in a directory. THIS IS DESTRUCTIVE and requires explicit approval. The root must be writable.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "root": {"type": "string", "description": "Absolute path to the directory"},
+          "suffix": {"type": "string", "description": "File suffix to match (e.g. '.log', '.tmp')"},
+          "recursive": {"type": "boolean", "description": "Whether to search subdirectories"}
+        },
+        "required": ["root", "suffix", "recursive"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "curl_to_file",
+      "description": "Download a URL to a local file. The host must be in the allowed hosts list and the output path must be writable.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {"type": "string", "description": "The full URL to download"},
+          "host": {"type": "string", "description": "The hostname (for policy check)"},
+          "output": {"type": "string", "description": "Absolute path to save the downloaded file"}
+        },
+        "required": ["url", "host", "output"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "read_file",
+      "description": "Read the contents of a file. The path must be readable per the active policy.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "Absolute path to the file to read"}
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write_file",
+      "description": "Write content to a file. The path must be writable per the active policy.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "Absolute path to the file to write"},
+          "content": {"type": "string", "description": "The content to write"}
+        },
+        "required": ["path", "content"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_dir",
+      "description": "List the contents of a directory. The path must be readable per the active policy.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "Absolute path to the directory to list"}
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mcp_call",
+      "description": "Call a tool on an MCP server. The server/tool pair must be in the allowed MCP list.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "server": {"type": "string", "description": "MCP server name"},
+          "tool": {"type": "string", "description": "Tool name on the server"},
+          "args": {"type": "string", "description": "JSON-encoded arguments for the tool"}
+        },
+        "required": ["server", "tool", "args"]
+      }
+    }
+  }
+]

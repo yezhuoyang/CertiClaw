@@ -1,0 +1,4 @@
+(executable
+ (name checker_server)
+ (modes byte)
+ (libraries certiclaw yojson))
