@@ -107,9 +107,107 @@ relevant but breaks correspondence claim.
 OCaml has `destructive : bool`; Lean Certificate only has `claimedEffects`,
 `destructive`, and `approval`. Need to verify Lean Certificate matches.
 
-## PAPER NOTATION ISSUES (pending full audit)
+## PAPER SCIENTIFIC ISSUES
 
-[Will be filled when paper audit agent completes]
+### C6. "18 theorems" count is inflated
+
+N6 (`traversal_consumed`) is literally `resolveDots_noDotDot segs` —
+an alias of N2. T5 is `∀ p, True`. Counting both as theorems inflates
+the count. Substantive distinct results are closer to 14-15.
+
+### C7. "blocks all 7 attack classes by construction" (abstract)
+
+The formal proofs cover only 4 of 7 variants. ReadFile, WriteFile,
+ListDir are NOT covered. The "by construction" claim requires proof
+coverage of the entire system, which we don't have.
+
+### M4. "Empirical" overstates methodology
+
+We extract isolated functions into standalone scripts and test them.
+This is unit-testing extracted functions, not running real systems
+against real attacks end-to-end. "Empirical" implies integration
+testing. Should say "we test the extracted security-critical functions."
+
+### M5. 11 "missing wrappers" are arguable as vulnerabilities
+
+`awk '{print $1}' file.txt` does not execute subcommands in practice.
+`nmap` is a scanner, not a command dispatcher. `strace`/`ltrace` are
+debugging tools. Fairer count of exploitable issues: 6-8, not 18.
+Should distinguish "coverage gaps" from "exploitable vulnerabilities."
+
+### M6. Performance uses Sys.time (~1ms resolution on Windows)
+
+Claiming ~4μs with Sys.time on Windows is below measurement
+resolution. Should disclose platform and use Unix.gettimeofday or
+Sys.time on Linux where resolution is 1μs.
+
+### M7. "500 lines of Lean" is actually ~810 lines
+
+Across 8 files. Even excluding blanks/comments, substantially more
+than 500.
+
+## PAPER NOTATION ISSUES
+
+### N1. `\kw{}` overloaded for constructors, functions, types, errors
+
+Should use distinct typographic treatments per PL convention.
+
+### N2. Check judgment: function or relation?
+
+Uses `→` (function arrow) in boxed form but `=` (equality) in the
+Check rule. Mixing conventions.
+
+### N3. Action grammar shows 4 constructors; OCaml has 7
+
+The formal syntax in §5.1 is incomplete.
+
+### N4. Ghost content from quantum computing paper
+
+`background.tex`, `casestudies.tex`, `compilation.tex`,
+`typesystem.tex`, `syntax.tex`, `theory.tex`, `distance.tex`,
+`logicalops.tex` are all from a "LogiQ" quantum error correction
+paper. Not included by main.tex but present in the directory.
+Delete before submission.
+
+### N5. Duplicate dead files
+
+`formalization.tex` and `normalization.tex` overlap with
+`verification.tex`. Only `verification.tex` is `\input`'d.
+`architecture.tex`, `overview.tex`, `threat.tex`, `tcb.tex`,
+`implementation.tex` are also dead (not included by main.tex).
+Delete all dead .tex files before submission.
+
+### N6. N6 is a duplicate of N2
+
+`traversal_consumed` is literally `resolveDots_noDotDot segs`.
+Listing it separately inflates the theorem count.
+
+## COMPLETE ISSUE SUMMARY
+
+| Severity | Count | IDs |
+|----------|-------|-----|
+| CRITICAL | 7 | C1 (4/7 variants), C2 (T5 vacuous), C3 (no has_traversal), C4 (symlink), C5 (null byte), C6 (theorem count), C7 (overclaim) |
+| MAJOR | 7 | M1 (no equivalence), M2 (pre-normalized), M3 (LOC wrong), M4 (empirical), M5 (vuln count), M6 (timing), M7 (Lean LOC) |
+| MINOR | 6+ | N1-N6, m1-m5 |
+
+## RECOMMENDED ACTIONS (priority order)
+
+1. **Add ReadFile/WriteFile/ListDir to Lean model** and reprove all
+   theorems. This closes C1 and C7.
+2. **Replace T5 with a real theorem** connecting check acceptance to
+   `".."` absence in effect paths, or downgrade it honestly. Closes C2.
+3. **Add has_traversal to Lean authorizeEffect** or document the gap.
+   Closes C3.
+4. **Re-measure LOC** excluding support types from TCB count. Fix all
+   "340" references. Closes M3.
+5. **Add null byte rejection to shell_quote**. Closes C5.
+6. **Document symlink limitation prominently** in paper and README.
+   Closes C4.
+7. **Delete all ghost .tex files** from paper directory. Closes N4, N5.
+8. **Qualify "empirical" and "vulnerability" claims.** Closes M4, M5.
+9. **Re-count theorems honestly** (drop N6 duplicate, note T5 is
+   trivial). Closes C6.
+10. **Fix LOC claims** (Lean ~810, not 500; TCB ~446, not 340). Closes M7.
 
 ## OCaml CODE ISSUES
 
