@@ -50,6 +50,8 @@ let show_rendered = function
     "Bash: " ^ cmd
   | McpRequest { server; tool; args } ->
     Printf.sprintf "MCP: server=%s tool=%s args=%s" server tool args
+  | DirectOp desc ->
+    "Direct: " ^ desc
 
 (** Format a full execution plan for display. *)
 let show_plan (p : execution_plan) : string =

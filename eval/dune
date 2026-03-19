@@ -1,4 +1,4 @@
-(executable
- (name run_eval)
+(executables
+ (names run_eval comparison)
  (modes byte)
  (libraries certiclaw))

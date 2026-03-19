@@ -93,6 +93,7 @@ let show_rendered_opt = function
   | Some (BashCommand cmd) -> "Bash: " ^ cmd
   | Some (McpRequest { server; tool; args }) ->
     Printf.sprintf "MCP: server=%s tool=%s args=%s" server tool args
+  | Some (DirectOp desc) -> "Direct: " ^ desc
 
 (** Format an audit record as human-readable text. *)
 let show_record (r : audit_record) : string =
@@ -147,6 +148,8 @@ let json_record (r : audit_record) : string =
     | Some (McpRequest { server; tool; args }) ->
       Printf.sprintf {|{"type":"mcp","server":"%s","tool":"%s","args":"%s"}|}
         (json_escape server) (json_escape tool) (json_escape args)
+    | Some (DirectOp desc) ->
+      Printf.sprintf {|{"type":"direct","op":"%s"}|} (json_escape desc)
   in
   Printf.sprintf
     {|{"seq":%d,"decision":%s,"error":%s,"action":"%s","inferred":[%s],"claimed":[%s],"rendered":%s,"mode":"%s"}|}

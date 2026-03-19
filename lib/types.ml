@@ -57,11 +57,6 @@ type approval =
 (* Certificate (proof)                                                 *)
 (* ================================================================== *)
 
-(** A certificate that the agent supplies alongside an action.
-    The checker verifies [claimed_effects] against independently
-    inferred effects — it never trusts the certificate directly.
-
-    Corresponds to Certificate in §4 of formal-core.md. *)
 type proof = {
   claimed_effects : action_effect list;
   destructive     : bool;
@@ -73,8 +68,6 @@ type proof = {
 (* Policy                                                              *)
 (* ================================================================== *)
 
-(** An authorization policy.  Corresponds to Policy in §3 of
-    formal-core.md.  All fields are allowlists; absence = deny. *)
 type policy = {
   readable_paths : string list;
   writable_paths : string list;
@@ -88,7 +81,8 @@ type policy = {
 (* ================================================================== *)
 
 (** Typed intermediate representation for agent actions.
-    Corresponds to Action in §1 of formal-core.md. *)
+    Seven variants covering file I/O, search, deletion, network
+    download, directory listing, and MCP tool invocation. *)
 type action =
   | GrepRecursive of {
       pattern : string;
@@ -110,6 +104,16 @@ type action =
       tool   : string;
       args   : string;
     }
+  | ReadFile of {
+      path : string;
+    }
+  | WriteFile of {
+      path    : string;
+      content : string;
+    }
+  | ListDir of {
+      path : string;
+    }
 
 (** Pretty-print an action (compact form for logs). *)
 let show_action = function
@@ -125,13 +129,20 @@ let show_action = function
   | McpCall { server; tool; args } ->
     Printf.sprintf "McpCall { server=%S; tool=%S; args=%S }"
       server tool args
+  | ReadFile { path } ->
+    Printf.sprintf "ReadFile { path=%S }" path
+  | WriteFile { path; content } ->
+    Printf.sprintf "WriteFile { path=%S; content=%S }" path
+      (if String.length content > 40
+       then String.sub content 0 37 ^ "..."
+       else content)
+  | ListDir { path } ->
+    Printf.sprintf "ListDir { path=%S }" path
 
 (* ================================================================== *)
 (* Checker errors                                                      *)
 (* ================================================================== *)
 
-(** Structured error type for checker rejections.
-    Corresponds to the error domain in §5 of formal-core.md. *)
 type check_error =
   | ClaimedEffectsMismatch
   | UnauthorizedRead     of string
@@ -164,22 +175,19 @@ let show_check_error = function
 (* Checker result                                                      *)
 (* ================================================================== *)
 
-(** Result of the core check judgment.
-    Corresponds to the judgment output in §5 of formal-core.md. *)
 type check_result =
   | Accepted
   | Rejected of check_error
 
 (* ================================================================== *)
-(* Rendering / plan types  [SUPPORT — outside trusted core]            *)
+(* Rendering / plan types  [SUPPORT]                                   *)
 (* ================================================================== *)
 
-(** What the renderer produced for a validated action. *)
 type rendered_form =
   | BashCommand of string
   | McpRequest  of { server : string; tool : string; args : string }
+  | DirectOp    of string  (** OCaml-native file operation description *)
 
-(** A structured execution plan. *)
 type execution_plan = {
   input_action     : action;
   inferred_effects : action_effect list;
@@ -188,17 +196,15 @@ type execution_plan = {
 }
 
 (* ================================================================== *)
-(* Pipeline result  [SUPPORT — composes core + rendering]              *)
+(* Pipeline result  [SUPPORT]                                          *)
 (* ================================================================== *)
 
-(** Context preserved on rejection for audit / debugging. *)
 type rejection_context = {
   rejected_action  : action;
   inferred_effects : action_effect list;
   claimed_effects  : action_effect list;
 }
 
-(** Structured pipeline result.  Returned by [Pipeline.run]. *)
 type pipeline_result =
   | PipelineAccepted of execution_plan
   | PipelineRejected of check_error * rejection_context
