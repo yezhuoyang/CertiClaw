@@ -111,6 +111,58 @@ OCaml has `destructive : bool`; Lean Certificate only has `claimedEffects`,
 
 [Will be filled when paper audit agent completes]
 
-## OCaml CODE ISSUES (pending full audit)
+## OCaml CODE ISSUES
 
-[Will be filled when OCaml audit agent completes]
+### C4. Symlink following in exec.ml defeats path containment
+
+**Location**: `lib/exec.ml` lines 17-47 (`execute_direct_op`)
+
+`open_in`, `open_out`, and `Sys.readdir` all follow symlinks. An
+attacker who can create a symlink at a path within the allowed
+directory can redirect reads/writes outside the policy sandbox:
+
+- Policy allows writes to `/tmp/workspace/`
+- Attacker: `ln -s /etc/passwd /tmp/workspace/output`
+- `WriteFile{path="/tmp/workspace/output", content="pwned"}` passes
+  path containment but writes to `/etc/passwd`
+
+The paper claims "path safety" but the execution layer defeats
+the lexical containment guarantees. path_check.ml normalization
+is purely lexical and cannot detect symlinks.
+
+**Severity: HIGH.**
+
+### C5. Null byte injection in shell_quote
+
+**Location**: `lib/render.ml` lines 9-10 (`shell_quote`)
+
+`shell_quote` wraps in single quotes but does not reject or strip
+null bytes. A malicious input like `"safe\x00; rm -rf /"` would:
+1. Pass OCaml string equality (full string compared)
+2. Be truncated at null by C `system()` call
+
+This is a classic null-byte injection. Mitigation: reject or strip
+`\x00` before rendering.
+
+**Severity: MEDIUM-HIGH.**
+
+### m4. `action_effect_equal` is dead code
+
+**Location**: `lib/types.ml` lines 30-37
+
+`action_effect_equal` is defined but never called anywhere. The
+checker uses generic `<>`. Dead code is a maintenance hazard —
+if someone adds an effect variant but forgets to update this
+function, no compiler warning fires.
+
+**Severity: LOW.**
+
+### m5. Wildcard match in execute_direct_op suppresses warnings
+
+**Location**: `lib/exec.ml` line 47
+
+`| _ -> ExecError "Not a direct operation"` suppresses
+exhaustiveness warnings. If a new direct-op variant is added,
+the compiler won't warn.
+
+**Severity: LOW.**
