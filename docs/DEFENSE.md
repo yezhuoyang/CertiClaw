@@ -145,16 +145,78 @@ standalone scripts. This misses:
 A fair test would run the actual frameworks end-to-end with
 recommended configurations.
 
-## Recommended Paper Changes
+## D8. OpenClaw safe-bin hardening single-quotes all argv tokens
 
-1. Add a "Nanobot (recommended config)" column to Table 5 showing
-   S4 and S6 as REJECT.
-2. Mention nanobot's allowlist mode in the baselines section.
-3. Rename "SSRF bypass" to "SSRF limitation" or "SSRF scope."
-4. Reduce "18 vulnerabilities" to "7-8 confirmed exploitable gaps"
-   and relabel the rest as "coverage limitations."
-5. Acknowledge OpenClaw's Docker sandbox as a complementary defense.
-6. Note that our tests extract functions in isolation, not
-   integration-test the full defense stack.
-7. Acknowledge that OpenClaw's default (deny + on-miss) is safe,
-   and that the vulnerabilities appear only in permissive modes.
+**Source**: `openclaw/src/infra/exec-approvals-analysis.ts` line 633
+
+When a command is matched as a safe-bin, `buildSafeBinsShellCommand`
+rebuilds the command by single-quoting every argv token:
+```typescript
+argv.map((token) => shellEscapeSingleArg(token)).join(" ")
+```
+
+This means `$HOME` in `cat $HOME/.ssh/id_rsa` gets single-quoted
+to `'$HOME'`, PREVENTING shell expansion entirely. Our test checked
+the pipeline token filter in isolation and missed this critical
+runtime hardening. The 3 "variable expansion" vulns are not
+exploitable through the safe-bin path.
+
+## D9. STRUCT-1 test is a hardcoded opinion, not empirical
+
+**Source**: `eval/test_openclaw_deep.mjs` line 236
+
+```javascript
+test("STRUCT-1", "Approved command string != analyzed segments", () => {
+  return { outcome: "VULN", detail: "..." };
+});
+```
+
+This "test" unconditionally returns "VULN" with a hardcoded string.
+It executes nothing. The paper claims "all confirmed by executing
+extracted security functions" but this is an assertion, not evidence.
+
+## D10. STRUCT-2 and STRUCT-3 double-count wrapper findings
+
+STRUCT-2 (xargs dispatch) and STRUCT-3 (find -exec) are the same
+issues already counted as W-xargs and W-find in the "missing
+wrappers" category. The paper counts each twice to inflate the
+total from ~12 to 18.
+
+## D11. OpenClaw's approval binding is command-string-exact
+
+**Source**: `openclaw/src/infra/exec-approvals.ts` lines 38-44
+
+The `SystemRunApprovalBinding` binds to exact argv, cwd, agentId,
+sessionKey, and envHash. Even if parser and shell disagree, the
+user approved the exact string that runs. The paper's "parser-shell
+gap" concern is mitigated by the approval binding.
+
+## D12. Honest vulnerability reassessment
+
+| Paper claim | Actual exploitable | Reason |
+|-------------|-------------------|--------|
+| 11 missing wrappers | 2 (xargs, find -exec) | 9 are category errors (awk/sed/perl are interpreters not wrappers; nmap/strace/ltrace are debug tools) |
+| 3 variable expansion | 0 | Safe-bin hardening single-quotes all argv; allowlist rejects unknown binaries |
+| 1 glob over-match | 0 | path.resolve() canonicalizes traversals before glob match; test bypassed this |
+| 3 parser-shell gap | 0 unique | 1 hardcoded opinion + 2 duplicates of wrapper findings |
+| **18 total** | **2 genuine gaps** | Both mitigated by default on-miss approval prompting |
+
+## Recommended Paper Changes (Updated)
+
+1. **Reduce "18 vulnerabilities" to "2 confirmed coverage gaps +
+   several design scope limitations."** The xargs and find -exec
+   gaps are real. Everything else is inflated.
+2. **Add "Nanobot (recommended config)" column** to Table 5.
+3. **Mention nanobot's allowlist mode** in baselines section.
+4. **Rename "SSRF bypass" to "SSRF scope limitation."**
+5. **Acknowledge OpenClaw's safe-bin argv hardening** which
+   single-quotes all tokens, preventing variable expansion.
+6. **Acknowledge OpenClaw's Docker sandbox** as defense in depth.
+7. **Remove STRUCT-1** (not a test) and **de-duplicate STRUCT-2/3**
+   from the wrapper findings.
+8. **Acknowledge default deny + on-miss** is the recommended
+   operational mode, not full mode.
+9. **Re-test glob over-matching** with the full resolution
+   pipeline (including path.resolve) to verify our claim.
+10. **Be honest about methodology**: "unit-tested extracted
+    functions" not "empirical evaluation of the full systems."
