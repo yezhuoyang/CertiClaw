@@ -1,0 +1,134 @@
+[
+  {
+    "id": "W-xargs",
+    "desc": "xargs not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "xargs can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-find",
+    "desc": "find not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "find can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-parallel",
+    "desc": "parallel not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "parallel can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-watch",
+    "desc": "watch not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "watch can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-script",
+    "desc": "script not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "script can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-strace",
+    "desc": "strace not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "strace can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-ltrace",
+    "desc": "ltrace not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "ltrace can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-nmap",
+    "desc": "nmap not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "nmap can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-awk",
+    "desc": "awk not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "awk can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-sed",
+    "desc": "sed not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "sed can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "W-perl",
+    "desc": "perl not in DISPATCH_WRAPPER_NAMES",
+    "outcome": "VULN",
+    "detail": "perl can dispatch commands but is NOT tracked as a wrapper"
+  },
+  {
+    "id": "VAR-1",
+    "desc": "$HOME expansion not blocked by pipeline tokens",
+    "outcome": "VULN",
+    "detail": "$HOME expansion passes pipeline token check (only $() is blocked)"
+  },
+  {
+    "id": "VAR-2",
+    "desc": "${VAR} brace expansion not blocked",
+    "outcome": "VULN",
+    "detail": "${} passes pipeline token check"
+  },
+  {
+    "id": "VAR-3",
+    "desc": "$IFS manipulation (field splitting attack)",
+    "outcome": "VULN",
+    "detail": "$IFS passes -- shell interprets differently than parser"
+  },
+  {
+    "id": "GLOB-1",
+    "desc": "** matches path traversal (../)",
+    "outcome": "VULN",
+    "detail": "Pattern /usr/local/bin/** matches traversal path /usr/local/bin/../../../etc/shadow"
+  },
+  {
+    "id": "GLOB-2",
+    "desc": "** matches across directory boundaries",
+    "outcome": "INFO",
+    "detail": "** matches deep paths (by design)"
+  },
+  {
+    "id": "GLOB-3",
+    "desc": "* does NOT match across /",
+    "outcome": "PASS",
+    "detail": "Correctly: * does not cross /"
+  },
+  {
+    "id": "CASE-1",
+    "desc": "Different case same directory",
+    "outcome": "INFO",
+    "detail": "Treated as inside (case-insensitive platform)"
+  },
+  {
+    "id": "CASE-2",
+    "desc": "Case mismatch in middle segment",
+    "outcome": "INFO",
+    "detail": "Treated as inside"
+  },
+  {
+    "id": "STRUCT-1",
+    "desc": "Approved command string != analyzed segments",
+    "outcome": "VULN",
+    "detail": "OpenClaw analyzes parsed segments but executes the ORIGINAL string. Any parser-shell divergence is exploitable. CertiClaw has no parser."
+  },
+  {
+    "id": "STRUCT-2",
+    "desc": "xargs can dispatch arbitrary commands after allowlist check",
+    "outcome": "VULN",
+    "detail": "Approved: \"xargs rm\" — allowlist sees \"xargs\" (not in wrappers), shell runs rm on every line of stdin. CertiClaw: rm requires RemoveByGlob IR."
+  },
+  {
+    "id": "STRUCT-3",
+    "desc": "find -exec dispatches unanalyzed commands",
+    "outcome": "VULN",
+    "detail": "Approved: \"find / -exec rm -rf {} \\;\" — allowlist sees \"find\" (safe bin), but -exec payload is never analyzed. CertiClaw: RemoveByGlob is the only delete IR."
+  }
+]
